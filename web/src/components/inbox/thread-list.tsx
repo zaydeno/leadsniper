@@ -57,33 +57,33 @@ export function ThreadList({ threads, selectedThread, onSelectThread }: ThreadLi
               </div>
 
               {/* Content */}
-              <div className="flex-1 min-w-0">
+              <div className="flex-1 min-w-0 overflow-hidden">
                 <div className="flex items-center justify-between gap-2">
                   <span className={cn(
-                    'font-medium truncate',
+                    'font-medium truncate block max-w-[140px]',
                     selectedThread?.id === thread.id
                       ? 'text-emerald-400'
                       : 'text-white'
                   )}>
-                    {thread.contact_name || formatPhoneNumber(thread.contact_phone)}
+                    {thread.contact_name || thread.metadata?.seller_name || formatPhoneNumber(thread.contact_phone)}
                   </span>
-                  <span className="text-xs text-gray-500 flex-shrink-0">
+                  <span className="text-xs text-gray-500 flex-shrink-0 whitespace-nowrap">
                     {formatDistanceToNow(new Date(thread.last_message_at), { addSuffix: false })}
                   </span>
                 </div>
 
                 {/* Vehicle model if available */}
                 {thread.metadata?.vehicle_model && (
-                  <div className="flex items-center gap-1 mt-0.5">
-                    <Car className="w-3 h-3 text-gray-500" />
-                    <span className="text-xs text-gray-500 truncate">
+                  <div className="flex items-center gap-1 mt-0.5 overflow-hidden">
+                    <Car className="w-3 h-3 text-gray-500 flex-shrink-0" />
+                    <span className="text-xs text-gray-500 truncate block">
                       {thread.metadata.vehicle_model}
                     </span>
                   </div>
                 )}
 
                 {/* Last message preview */}
-                <p className="text-sm text-gray-500 truncate mt-1">
+                <p className="text-sm text-gray-400 mt-1 line-clamp-1">
                   {thread.last_message_preview || 'No messages'}
                 </p>
               </div>
