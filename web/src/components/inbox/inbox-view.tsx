@@ -120,6 +120,8 @@ export function InboxView({ initialThreads, userProfile }: InboxViewProps) {
         body: JSON.stringify({
           to: selectedThread.contact_phone,
           content,
+          // Pass organization_id for proper routing
+          organization_id: selectedThread.organization_id || userProfile?.organization_id,
         }),
       });
 
