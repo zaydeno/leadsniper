@@ -2,7 +2,7 @@
 
 export type UserRole = 'superadmin' | 'org_admin' | 'sales';
 export type MessageDirection = 'inbound' | 'outbound';
-export type MessageStatus = 'sent' | 'received' | 'failed' | 'pending';
+export type MessageStatus = 'sent' | 'received' | 'failed' | 'pending' | 'delivered' | 'expired';
 
 export interface Organization {
   id: string;
@@ -10,6 +10,7 @@ export interface Organization {
   slug: string;
   httpsms_api_key: string | null;
   httpsms_from_number: string | null;
+  httpsms_webhook_signing_key: string | null;
   max_sales_seats: number | null; // NULL = unlimited
   is_active: boolean;
   created_at: string;
@@ -107,10 +108,33 @@ export interface ThreadMetadata {
   [key: string]: unknown;
 }
 
-// httpsms Webhook Payloads
+// Phone Status (for heartbeat tracking)
+export interface PhoneStatus {
+  id: string;
+  phone_number: string;
+  organization_id: string | null;
+  is_online: boolean;
+  last_heartbeat_at: string;
+  went_offline_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+// httpsms Webhook Event Types
+export type HttpSmsEventType =
+  | 'message.phone.received'
+  | 'message.phone.sent'
+  | 'message.phone.delivered'
+  | 'message.send.failed'
+  | 'message.send.expired'
+  | 'message.call.missed'
+  | 'phone.heartbeat.offline'
+  | 'phone.heartbeat.online';
+
+// httpsms Webhook Payloads (CloudEvents format)
 export interface HttpSmsWebhookPayload {
-  event_type: 'message.phone.received' | 'message.phone.sent' | 'call.missed';
-  data: HttpSmsMessageData | HttpSmsCallData;
+  type: HttpSmsEventType;
+  data: HttpSmsMessageData | HttpSmsCallData | HttpSmsHeartbeatData;
 }
 
 export interface HttpSmsMessageData {
@@ -121,6 +145,7 @@ export interface HttpSmsMessageData {
   timestamp: string;
   sim: 'SIM1' | 'SIM2';
   encrypted: boolean;
+  failure_reason?: string;
 }
 
 export interface HttpSmsCallData {
@@ -129,6 +154,11 @@ export interface HttpSmsCallData {
   contact: string;
   timestamp: string;
   sim: 'SIM1' | 'SIM2';
+}
+
+export interface HttpSmsHeartbeatData {
+  owner: string;
+  timestamp: string;
 }
 
 // API Request/Response Types
