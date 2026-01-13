@@ -40,6 +40,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const sentCountEl = document.getElementById('sentCount');
   const timerCountEl = document.getElementById('timerCount');
   const timerStat = document.getElementById('timerStat');
+  const clearQueueBtn = document.getElementById('clearQueueBtn');
 
   // State
   let currentUser = null;
@@ -225,6 +226,23 @@ document.addEventListener('DOMContentLoaded', () => {
     if (countdownInterval) clearInterval(countdownInterval);
     countdownInterval = setInterval(updateTimer, 1000);
     updateTimer();
+  }
+
+  function clearQueue() {
+    if (messageQueue.length === 0) {
+      updateStatus('Queue is already empty', '');
+      return;
+    }
+    
+    const count = messageQueue.length;
+    messageQueue = [];
+    updateCounters();
+    
+    // Reset timer
+    nextSendTime = null;
+    updateTimer();
+    
+    updateStatus(`Cleared ${count} item${count > 1 ? 's' : ''} from queue`, 'success');
   }
 
   // =====================
@@ -508,6 +526,7 @@ document.addEventListener('DOMContentLoaded', () => {
   logoutBtn.addEventListener('click', logout);
   scrapeBtn.addEventListener('click', scrapeData);
   sendBtn.addEventListener('click', addToQueue);
+  clearQueueBtn.addEventListener('click', clearQueue);
   settingsBtn.addEventListener('click', toggleSettings);
   closeSettings.addEventListener('click', toggleSettings);
   saveSettings.addEventListener('click', saveSettingsToStorage);
