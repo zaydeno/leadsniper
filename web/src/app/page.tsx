@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { Zap, MessageSquare, Phone, Users, ArrowRight, Chrome } from 'lucide-react';
+import { Zap, MessageSquare, Phone, Shield, Lock, Chrome } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
 export default function LandingPage() {
@@ -29,13 +29,8 @@ export default function LandingPage() {
           </div>
           <div className="flex items-center gap-4">
             <Link href="/login">
-              <Button variant="ghost" className="text-gray-400 hover:text-white">
-                Sign In
-              </Button>
-            </Link>
-            <Link href="/login">
               <Button className="bg-emerald-500 hover:bg-emerald-600 shadow-lg shadow-emerald-500/25">
-                Get Started
+                Sign In
               </Button>
             </Link>
           </div>
@@ -46,9 +41,9 @@ export default function LandingPage() {
       <main className="relative z-10">
         <div className="max-w-7xl mx-auto px-6 pt-24 pb-16">
           <div className="text-center max-w-3xl mx-auto">
-            <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-sm font-medium mb-8">
-              <Zap className="w-4 h-4" />
-              Built for Automotive Sales Teams
+            <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-amber-500/10 border border-amber-500/20 text-amber-400 text-sm font-medium mb-8">
+              <Lock className="w-4 h-4" />
+              Invite Only Access
             </div>
             
             <h1 className="text-5xl md:text-6xl font-bold leading-tight mb-6">
@@ -63,21 +58,21 @@ export default function LandingPage() {
               send personalized messages, and manage all conversations in one place.
             </p>
 
-            <div className="flex items-center justify-center gap-4">
-              <Link href="/login">
-                <Button size="lg" className="h-12 px-8 bg-emerald-500 hover:bg-emerald-600 shadow-lg shadow-emerald-500/25 text-base font-medium group">
-                  Start Free Trial
-                  <ArrowRight className="w-4 h-4 ml-2 group-hover:translate-x-1 transition-transform" />
-                </Button>
-              </Link>
-              <Button 
-                size="lg" 
-                variant="outline" 
-                className="h-12 px-8 border-gray-700 text-gray-300 hover:bg-white/5 hover:text-white text-base font-medium"
-              >
-                <Chrome className="w-4 h-4 mr-2" />
-                Get Extension
-              </Button>
+            <div className="flex flex-col items-center gap-4">
+              <div className="p-6 rounded-2xl bg-[#12121a] border border-gray-800/50 max-w-md">
+                <div className="flex items-center justify-center gap-2 mb-3">
+                  <Shield className="w-5 h-5 text-emerald-400" />
+                  <span className="font-medium text-white">Exclusive Access</span>
+                </div>
+                <p className="text-gray-400 text-sm mb-4">
+                  LeadSniper is currently available by invitation only. If you&apos;ve received an invite code, sign in to get started.
+                </p>
+                <Link href="/login" className="block">
+                  <Button className="w-full bg-emerald-500 hover:bg-emerald-600 shadow-lg shadow-emerald-500/25">
+                    Sign In with Invite Code
+                  </Button>
+                </Link>
+              </div>
             </div>
           </div>
         </div>
@@ -139,13 +134,13 @@ export default function LandingPage() {
           <div className="relative rounded-3xl bg-gradient-to-br from-emerald-500/20 via-[#12121a] to-cyan-500/20 border border-gray-800 p-12 text-center overflow-hidden">
             <div className="absolute inset-0 bg-gradient-to-br from-emerald-500/5 to-cyan-500/5" />
             <div className="relative z-10">
-              <h2 className="text-3xl font-bold mb-4">Ready to Close More Deals?</h2>
+              <h2 className="text-3xl font-bold mb-4">Already Have an Invite?</h2>
               <p className="text-gray-400 mb-8 max-w-xl mx-auto">
-                Join automotive sales teams who are using LeadSniper to generate more leads and close more deals.
+                Sign in with your credentials to access the LeadSniper platform and start closing more deals today.
               </p>
               <Link href="/login">
                 <Button size="lg" className="h-12 px-8 bg-white text-black hover:bg-gray-100 font-medium">
-                  Get Started for Free
+                  Sign In to Dashboard
                 </Button>
               </Link>
             </div>
