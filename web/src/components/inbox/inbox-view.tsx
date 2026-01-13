@@ -169,6 +169,27 @@ export function InboxView({ initialThreads, userProfile }: InboxViewProps) {
     );
   };
 
+  const handleDelete = async () => {
+    if (!selectedThread) return;
+
+    const response = await fetch(`/api/threads/${selectedThread.id}`, {
+      method: 'DELETE',
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(data.error || 'Failed to delete');
+    }
+
+    // Remove thread from list
+    setThreads(prev => prev.filter(t => t.id !== selectedThread.id));
+    
+    // Clear selection
+    setSelectedThread(null);
+    setMessages([]);
+  };
+
   return (
     <div className="h-screen flex">
       {/* Thread list */}
@@ -195,6 +216,7 @@ export function InboxView({ initialThreads, userProfile }: InboxViewProps) {
             isLoading={isLoadingMessages}
             onSendMessage={handleSendMessage}
             onReassign={handleReassign}
+            onDelete={handleDelete}
             userProfile={userProfile}
           />
         ) : (

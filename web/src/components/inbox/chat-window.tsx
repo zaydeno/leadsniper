@@ -17,7 +17,8 @@ import {
   ChevronDown,
   ChevronUp,
   UserPlus,
-  Loader2
+  Loader2,
+  Trash2
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -45,6 +46,7 @@ interface ChatWindowProps {
   isLoading: boolean;
   onSendMessage: (content: string) => Promise<void>;
   onReassign?: (userId: string) => Promise<void>;
+  onDelete?: () => Promise<void>;
   userProfile: Profile | null;
 }
 
@@ -54,6 +56,7 @@ export function ChatWindow({
   isLoading, 
   onSendMessage,
   onReassign,
+  onDelete,
   userProfile 
 }: ChatWindowProps) {
   const [newMessage, setNewMessage] = useState('');
@@ -62,6 +65,8 @@ export function ChatWindow({
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
   const [isLoadingTeam, setIsLoadingTeam] = useState(false);
   const [isReassigning, setIsReassigning] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -99,6 +104,22 @@ export function ChatWindow({
       toast.error('Failed to reassign conversation');
     } finally {
       setIsReassigning(false);
+    }
+  };
+
+  // Handle delete
+  const handleDelete = async () => {
+    if (!onDelete || isDeleting) return;
+    
+    setIsDeleting(true);
+    try {
+      await onDelete();
+      toast.success('Conversation deleted');
+      setShowDeleteConfirm(false);
+    } catch (error) {
+      toast.error('Failed to delete conversation');
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -243,8 +264,57 @@ export function ChatWindow({
                 </DropdownMenuContent>
               </DropdownMenu>
             )}
+
+            {/* Delete Button */}
+            {onDelete && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-gray-400 hover:text-red-400 hover:bg-red-500/10 text-xs"
+                onClick={() => setShowDeleteConfirm(true)}
+                disabled={isDeleting}
+              >
+                {isDeleting ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Trash2 className="w-4 h-4" />
+                )}
+              </Button>
+            )}
           </div>
         </div>
+
+        {/* Delete Confirmation */}
+        {showDeleteConfirm && (
+          <div className="mx-4 mt-4 p-4 bg-red-500/10 border border-red-500/20 rounded-xl animate-in slide-in-from-top-2">
+            <p className="text-sm text-white mb-3">
+              Are you sure you want to delete this conversation? This will permanently remove all messages.
+            </p>
+            <div className="flex gap-2 justify-end">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setShowDeleteConfirm(false)}
+                className="text-gray-400 hover:text-white"
+              >
+                Cancel
+              </Button>
+              <Button
+                size="sm"
+                onClick={handleDelete}
+                disabled={isDeleting}
+                className="bg-red-500 hover:bg-red-600 text-white"
+              >
+                {isDeleting ? (
+                  <Loader2 className="w-4 h-4 mr-1 animate-spin" />
+                ) : (
+                  <Trash2 className="w-4 h-4 mr-1" />
+                )}
+                Delete
+              </Button>
+            </div>
+          </div>
+        )}
 
         {/* Lead Details Panel */}
         {showDetails && hasMetadata && (

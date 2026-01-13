@@ -6,6 +6,42 @@ import { createAdminClient } from '@/lib/supabase/admin';
 // Docs: https://docs.httpsms.com/webhooks/introduction
 // =============================================
 
+// Send SMS notification to a user
+async function sendSmsNotification(
+  apiKey: string,
+  fromNumber: string,
+  toNumber: string,
+  message: string
+) {
+  try {
+    const response = await fetch('https://api.httpsms.com/v1/messages/send', {
+      method: 'POST',
+      headers: {
+        'x-api-key': apiKey,
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        content: message,
+        from: fromNumber,
+        to: toNumber,
+      }),
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      console.error('Failed to send notification SMS:', error);
+      return false;
+    }
+
+    console.log(`📲 Notification sent to ${toNumber}`);
+    return true;
+  } catch (error) {
+    console.error('Error sending notification SMS:', error);
+    return false;
+  }
+}
+
 // Normalize phone number to a consistent format
 function normalizePhoneNumber(phone: string): string {
   const cleaned = phone.replace(/[^\d+]/g, '');
@@ -130,7 +166,84 @@ async function handleMessageReceived(
   await upsertThread(supabase, threadId, fromNumber, org?.id || null, content, true);
 
   console.log(`📥 Inbound SMS from ${fromNumber} to org ${org?.id || 'unknown'}`);
+
+  // =============================================
+  // SEND SMS NOTIFICATIONS
+  // =============================================
+  if (org?.id && org.httpsms_api_key && org.httpsms_from_number) {
+    // Get thread to check if it's assigned to someone
+    const { data: thread } = await supabase
+      .from('threads')
+      .select('assigned_to, contact_name, metadata')
+      .eq('id', threadId)
+      .single();
+
+    // Get contact info for notification
+    const contactName = thread?.contact_name || 
+      thread?.metadata?.seller_name || 
+      formatPhoneForDisplay(fromNumber);
+    const vehicleModel = thread?.metadata?.vehicle_model;
+
+    // Build notification message
+    let notificationMessage = `📩 New message from ${contactName} (${formatPhoneForDisplay(fromNumber)})`;
+    if (vehicleModel) {
+      notificationMessage += ` regarding the ${vehicleModel}`;
+    }
+    notificationMessage += `\n\n"${content.substring(0, 100)}${content.length > 100 ? '...' : ''}"`;
+
+    if (thread?.assigned_to) {
+      // Thread is assigned - notify the assigned user
+      const { data: assignedUser } = await supabase
+        .from('profiles')
+        .select('notification_number, full_name')
+        .eq('id', thread.assigned_to)
+        .single();
+
+      if (assignedUser?.notification_number) {
+        await sendSmsNotification(
+          org.httpsms_api_key,
+          org.httpsms_from_number,
+          assignedUser.notification_number,
+          notificationMessage
+        );
+      }
+    } else {
+      // Thread not assigned - notify all org members with notification numbers
+      const { data: orgMembers } = await supabase
+        .from('profiles')
+        .select('notification_number, full_name')
+        .eq('organization_id', org.id)
+        .not('notification_number', 'is', null);
+
+      if (orgMembers && orgMembers.length > 0) {
+        // Send to all org members with notification numbers
+        for (const member of orgMembers) {
+          if (member.notification_number) {
+            await sendSmsNotification(
+              org.httpsms_api_key,
+              org.httpsms_from_number,
+              member.notification_number,
+              notificationMessage
+            );
+          }
+        }
+      }
+    }
+  }
+
   return { success: true, type: 'message_received' };
+}
+
+// Format phone number for display in notifications
+function formatPhoneForDisplay(phone: string): string {
+  const cleaned = phone.replace(/\D/g, '');
+  if (cleaned.length === 11 && cleaned.startsWith('1')) {
+    return `(${cleaned.slice(1, 4)}) ${cleaned.slice(4, 7)}-${cleaned.slice(7)}`;
+  }
+  if (cleaned.length === 10) {
+    return `(${cleaned.slice(0, 3)}) ${cleaned.slice(3, 6)}-${cleaned.slice(6)}`;
+  }
+  return phone;
 }
 
 // Handle outbound SMS sent: message.phone.sent
