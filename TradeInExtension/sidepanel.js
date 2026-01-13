@@ -8,7 +8,7 @@ document.addEventListener('DOMContentLoaded', () => {
   
   // Login elements
   const loginForm = document.getElementById('loginForm');
-  const loginEmail = document.getElementById('loginEmail');
+  const loginUsername = document.getElementById('loginUsername');
   const loginPassword = document.getElementById('loginPassword');
   const loginBtn = document.getElementById('loginBtn');
   const loginError = document.getElementById('loginError');
@@ -88,10 +88,13 @@ document.addEventListener('DOMContentLoaded', () => {
     showLoginScreen();
   }
   
-  async function login(email, password) {
+  async function login(username, password) {
     loginBtn.disabled = true;
     loginBtn.innerHTML = '<span>Signing in...</span>';
     loginError.textContent = '';
+    
+    // Convert username to email format (same as web app)
+    const email = `${username.toLowerCase()}@leadsniper.local`;
     
     try {
       const response = await fetch(`${API_BASE}/api/extension/auth`, {
@@ -137,7 +140,7 @@ document.addEventListener('DOMContentLoaded', () => {
   function showLoginScreen() {
     loginScreen.style.display = 'flex';
     appScreen.style.display = 'none';
-    loginEmail.value = '';
+    loginUsername.value = '';
     loginPassword.value = '';
     loginError.textContent = '';
   }
@@ -499,7 +502,7 @@ document.addEventListener('DOMContentLoaded', () => {
   
   loginForm.addEventListener('submit', (e) => {
     e.preventDefault();
-    login(loginEmail.value, loginPassword.value);
+    login(loginUsername.value, loginPassword.value);
   });
   
   logoutBtn.addEventListener('click', logout);
