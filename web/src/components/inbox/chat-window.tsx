@@ -6,7 +6,6 @@ import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
 import { 
   Send, 
-  Phone, 
   User, 
   Check, 
   CheckCheck, 
@@ -16,17 +15,36 @@ import {
   ExternalLink,
   UserCircle,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  UserPlus,
+  Loader2
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { toast } from 'sonner';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+
+interface TeamMember {
+  id: string;
+  full_name: string | null;
+  username: string | null;
+  email: string;
+  role: string;
+}
 
 interface ChatWindowProps {
   thread: Thread;
   messages: Message[];
   isLoading: boolean;
   onSendMessage: (content: string) => Promise<void>;
+  onReassign?: (userId: string) => Promise<void>;
   userProfile: Profile | null;
 }
 
@@ -35,13 +53,54 @@ export function ChatWindow({
   messages, 
   isLoading, 
   onSendMessage,
+  onReassign,
   userProfile 
 }: ChatWindowProps) {
   const [newMessage, setNewMessage] = useState('');
   const [isSending, setIsSending] = useState(false);
   const [showDetails, setShowDetails] = useState(false);
+  const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
+  const [isLoadingTeam, setIsLoadingTeam] = useState(false);
+  const [isReassigning, setIsReassigning] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  // Check if user can reassign (org_admin or superadmin)
+  const canReassign = userProfile?.role === 'superadmin' || userProfile?.role === 'org_admin';
+
+  // Fetch team members when dropdown opens
+  const fetchTeamMembers = async () => {
+    if (teamMembers.length > 0 || isLoadingTeam) return;
+    
+    setIsLoadingTeam(true);
+    try {
+      const response = await fetch('/api/team/members');
+      if (response.ok) {
+        const data = await response.json();
+        setTeamMembers(data.members || []);
+      }
+    } catch (error) {
+      console.error('Failed to fetch team members:', error);
+    } finally {
+      setIsLoadingTeam(false);
+    }
+  };
+
+  // Handle reassignment
+  const handleReassign = async (userId: string) => {
+    if (!onReassign || isReassigning) return;
+    
+    setIsReassigning(true);
+    try {
+      await onReassign(userId);
+      const member = teamMembers.find(m => m.id === userId);
+      toast.success(`Conversation reassigned to ${member?.full_name || member?.username || 'team member'}`);
+    } catch (error) {
+      toast.error('Failed to reassign conversation');
+    } finally {
+      setIsReassigning(false);
+    }
+  };
 
   // Extract metadata
   const metadata = thread.metadata || {};
@@ -116,14 +175,74 @@ export function ChatWindow({
                 )}
               </Button>
             )}
-            <Button
-              variant="ghost"
-              size="icon"
-              className="text-gray-400 hover:text-emerald-400 hover:bg-emerald-500/10"
-              onClick={() => window.open(`tel:${thread.contact_phone}`)}
-            >
-              <Phone className="w-5 h-5" />
-            </Button>
+            
+            {/* Reassign Dropdown - Only for org_admin and superadmin */}
+            {canReassign && onReassign && (
+              <DropdownMenu onOpenChange={(open) => open && fetchTeamMembers()}>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="text-gray-400 hover:text-emerald-400 hover:bg-emerald-500/10 text-xs"
+                    disabled={isReassigning}
+                  >
+                    {isReassigning ? (
+                      <Loader2 className="w-4 h-4 mr-1 animate-spin" />
+                    ) : (
+                      <UserPlus className="w-4 h-4 mr-1" />
+                    )}
+                    Reassign
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent 
+                  align="end" 
+                  className="w-56 bg-[#1a1a24] border-gray-800"
+                >
+                  <DropdownMenuLabel className="text-gray-400">
+                    Assign to Team Member
+                  </DropdownMenuLabel>
+                  <DropdownMenuSeparator className="bg-gray-800" />
+                  
+                  {isLoadingTeam ? (
+                    <div className="flex items-center justify-center py-4">
+                      <Loader2 className="w-4 h-4 animate-spin text-gray-400" />
+                    </div>
+                  ) : teamMembers.length === 0 ? (
+                    <div className="py-4 text-center text-sm text-gray-500">
+                      No team members found
+                    </div>
+                  ) : (
+                    teamMembers.map((member) => (
+                      <DropdownMenuItem
+                        key={member.id}
+                        onClick={() => handleReassign(member.id)}
+                        className="cursor-pointer hover:bg-emerald-500/10 focus:bg-emerald-500/10"
+                        disabled={member.id === thread.assigned_to}
+                      >
+                        <div className="flex items-center gap-2">
+                          <div className="w-6 h-6 rounded-full bg-emerald-500/20 flex items-center justify-center">
+                            <User className="w-3 h-3 text-emerald-400" />
+                          </div>
+                          <div className="flex flex-col">
+                            <span className="text-sm text-white">
+                              {member.full_name || member.username || member.email}
+                            </span>
+                            <span className="text-xs text-gray-500 capitalize">
+                              {member.role.replace('_', ' ')}
+                            </span>
+                          </div>
+                          {member.id === thread.assigned_to && (
+                            <span className="ml-auto text-xs text-emerald-400">
+                              Current
+                            </span>
+                          )}
+                        </div>
+                      </DropdownMenuItem>
+                    ))
+                  )}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
           </div>
         </div>
 

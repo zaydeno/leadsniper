@@ -139,6 +139,36 @@ export function InboxView({ initialThreads, userProfile }: InboxViewProps) {
     }
   };
 
+  const handleReassign = async (userId: string) => {
+    if (!selectedThread) return;
+
+    const response = await fetch(`/api/threads/${selectedThread.id}/reassign`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId }),
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(data.error || 'Failed to reassign');
+    }
+
+    // Update thread locally
+    setThreads(prev =>
+      prev.map(t =>
+        t.id === selectedThread.id 
+          ? { ...t, assigned_to: userId }
+          : t
+      )
+    );
+
+    // Update selected thread
+    setSelectedThread(prev => 
+      prev ? { ...prev, assigned_to: userId } : null
+    );
+  };
+
   return (
     <div className="h-screen flex">
       {/* Thread list */}
@@ -164,6 +194,7 @@ export function InboxView({ initialThreads, userProfile }: InboxViewProps) {
             messages={messages}
             isLoading={isLoadingMessages}
             onSendMessage={handleSendMessage}
+            onReassign={handleReassign}
             userProfile={userProfile}
           />
         ) : (
