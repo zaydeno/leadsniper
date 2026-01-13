@@ -227,17 +227,18 @@ async function handleMessageFailed(
     console.error('Error updating message to failed:', error);
   }
 
-  // Update metadata with failure reason using raw SQL via RPC if available
+  // Update metadata with failure reason
   if (reason) {
-    await supabase
-      .from('messages')
-      .update({
-        metadata: { failure_reason: reason },
-      })
-      .eq('httpsms_id', httpsmsId)
-      .catch(() => {
-        // Ignore metadata update errors
-      });
+    try {
+      await supabase
+        .from('messages')
+        .update({
+          metadata: { failure_reason: reason },
+        })
+        .eq('httpsms_id', httpsmsId);
+    } catch {
+      // Ignore metadata update errors
+    }
   }
 
   console.log(`❌ SMS failed: ${httpsmsId} - ${reason}`);
