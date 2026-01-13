@@ -1,18 +1,38 @@
+// LeadSniper Extension - with authentication
+const API_BASE = 'https://leadsniperpublic.vercel.app'; // Production API
+
 document.addEventListener('DOMContentLoaded', () => {
+  // Screens
+  const loginScreen = document.getElementById('loginScreen');
+  const appScreen = document.getElementById('appScreen');
+  
+  // Login elements
+  const loginForm = document.getElementById('loginForm');
+  const loginEmail = document.getElementById('loginEmail');
+  const loginPassword = document.getElementById('loginPassword');
+  const loginBtn = document.getElementById('loginBtn');
+  const loginError = document.getElementById('loginError');
+  
+  // User info elements
+  const userAvatar = document.getElementById('userAvatar');
+  const userName = document.getElementById('userName');
+  const userOrg = document.getElementById('userOrg');
+  const logoutBtn = document.getElementById('logoutBtn');
+  
+  // Main app elements
   const scrapeBtn = document.getElementById('scrapeBtn');
   const sendBtn = document.getElementById('sendBtn');
   const statusBar = document.getElementById('statusBar');
   const nameField = document.getElementById('nameField');
   const modelField = document.getElementById('modelField');
   const phoneField = document.getElementById('phoneField');
+  const urlField = document.getElementById('urlField');
   
   // Settings elements
   const settingsBtn = document.getElementById('settingsBtn');
   const settingsPanel = document.getElementById('settingsPanel');
   const closeSettings = document.getElementById('closeSettings');
   const saveSettings = document.getElementById('saveSettings');
-  const apiKeyField = document.getElementById('apiKeyField');
-  const fromNumberField = document.getElementById('fromNumberField');
   const messageTemplate = document.getElementById('messageTemplate');
 
   // Stats elements
@@ -21,7 +41,9 @@ document.addEventListener('DOMContentLoaded', () => {
   const timerCountEl = document.getElementById('timerCount');
   const timerStat = document.getElementById('timerStat');
 
-  // Queue system
+  // State
+  let currentUser = null;
+  let authToken = null;
   let messageQueue = [];
   let sentCount = 0;
   let isProcessing = false;
@@ -31,37 +53,148 @@ document.addEventListener('DOMContentLoaded', () => {
   // Default message template with spintax
   const DEFAULT_TEMPLATE = `{Hi|Hello|Hey|Hi there} [Customer Name]! {It's|This is} Zayden O'Gorman, {the|your} acquisition manager {at|from} Stony Plain Chrysler. {We're looking to|My team and I want to} {refresh|update} our {inventory|pre-owned stock} and {[Models] are|the [Models] is} {at the top of our list|in high demand right now}. We {are offering|can offer} {wholesale value|top market value} + a $1000 {Bonus|Trade-In Credit} if you {would be|are} {willing to consider|open to} trading {it|your vehicle} in {to our dealership|to us}. I {can also|could also} {get|secure} you a {pretty good|fantastic} deal on {any|a} new or {certified pre-owned|CPO} vehicle {on our lot|in stock}. {Would you be interested in hearing|Are you open to seeing|Would you want to hear} what we {can offer you|have to offer}?`;
 
-  // Process spintax - randomly select from {option1|option2|option3}
+  // =====================
+  // AUTHENTICATION
+  // =====================
+  
+  async function checkAuth() {
+    const stored = await chrome.storage.local.get(['authToken', 'currentUser', 'sentCount', 'messageTemplate']);
+    
+    if (stored.authToken && stored.currentUser) {
+      // Verify token is still valid
+      try {
+        const response = await fetch(`${API_BASE}/api/extension/auth`, {
+          headers: {
+            'Authorization': `Bearer ${stored.authToken}`,
+          },
+        });
+        
+        if (response.ok) {
+          const data = await response.json();
+          authToken = stored.authToken;
+          currentUser = data.user;
+          sentCount = stored.sentCount || 0;
+          showAppScreen();
+          return;
+        }
+      } catch (error) {
+        console.error('Auth check failed:', error);
+      }
+      
+      // Token invalid, clear storage
+      await chrome.storage.local.remove(['authToken', 'currentUser']);
+    }
+    
+    showLoginScreen();
+  }
+  
+  async function login(email, password) {
+    loginBtn.disabled = true;
+    loginBtn.innerHTML = '<span>Signing in...</span>';
+    loginError.textContent = '';
+    
+    try {
+      const response = await fetch(`${API_BASE}/api/extension/auth`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ email, password }),
+      });
+      
+      const data = await response.json();
+      
+      if (!response.ok) {
+        throw new Error(data.error || 'Login failed');
+      }
+      
+      authToken = data.token;
+      currentUser = data.user;
+      
+      // Store credentials
+      await chrome.storage.local.set({
+        authToken: data.token,
+        currentUser: data.user,
+      });
+      
+      showAppScreen();
+      
+    } catch (error) {
+      loginError.textContent = error.message;
+    } finally {
+      loginBtn.disabled = false;
+      loginBtn.innerHTML = '<span>Sign In</span>';
+    }
+  }
+  
+  async function logout() {
+    await chrome.storage.local.remove(['authToken', 'currentUser']);
+    authToken = null;
+    currentUser = null;
+    showLoginScreen();
+  }
+  
+  function showLoginScreen() {
+    loginScreen.style.display = 'flex';
+    appScreen.style.display = 'none';
+    loginEmail.value = '';
+    loginPassword.value = '';
+    loginError.textContent = '';
+  }
+  
+  function showAppScreen() {
+    loginScreen.style.display = 'none';
+    appScreen.style.display = 'flex';
+    
+    // Update user info
+    if (currentUser) {
+      const initials = (currentUser.name || currentUser.email || 'U')
+        .split(' ')
+        .map(n => n[0])
+        .join('')
+        .toUpperCase()
+        .substring(0, 2);
+      userAvatar.textContent = initials;
+      userName.textContent = currentUser.name || currentUser.email;
+      userOrg.textContent = currentUser.organization_name || 'No Organization';
+    }
+    
+    loadSettings();
+    updateCounters();
+    scrapeData();
+  }
+  
+  // =====================
+  // SPINTAX & TEMPLATING
+  // =====================
+  
   function processSpintax(text) {
     const spintaxRegex = /\{([^{}]+)\}/g;
     return text.replace(spintaxRegex, (match, options) => {
-      // Check if it contains a pipe (spintax) vs just a placeholder
       if (options.includes('|')) {
         const choices = options.split('|');
         return choices[Math.floor(Math.random() * choices.length)];
       }
-      // Not spintax, return as-is
       return match;
     });
   }
 
-  // Get random delay between 60-70 seconds (in ms)
+  // =====================
+  // QUEUE SYSTEM
+  // =====================
+  
   function getRandomDelay() {
     return (60 + Math.floor(Math.random() * 11)) * 1000; // 60-70 seconds
   }
 
-  // Format phone number to +xxxxxxxxxxx (remove dashes, spaces, etc.)
   function formatPhoneNumber(phone) {
-    // Keep only + and digits
     return phone.replace(/[^\d+]/g, '');
   }
 
-  // Update UI counters
   function updateCounters() {
     queueCountEl.textContent = messageQueue.length;
     sentCountEl.textContent = sentCount;
     
-    // Highlight queue if there are items
     if (messageQueue.length > 0) {
       queueCountEl.classList.add('stat-warning');
     } else {
@@ -69,7 +202,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  // Update countdown timer
   function updateTimer() {
     if (nextSendTime && messageQueue.length > 0) {
       const remaining = Math.max(0, nextSendTime - Date.now());
@@ -86,32 +218,28 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  // Start countdown interval
   function startCountdown() {
     if (countdownInterval) clearInterval(countdownInterval);
     countdownInterval = setInterval(updateTimer, 1000);
     updateTimer();
   }
 
-  // Load settings and stats from storage
+  // =====================
+  // SETTINGS
+  // =====================
+  
   async function loadSettings() {
-    const result = await chrome.storage.local.get(['apiKey', 'fromNumber', 'messageTemplate', 'sentCount']);
-    if (result.apiKey) apiKeyField.value = result.apiKey;
-    if (result.fromNumber) fromNumberField.value = result.fromNumber;
+    const result = await chrome.storage.local.get(['messageTemplate', 'sentCount']);
     messageTemplate.value = result.messageTemplate || DEFAULT_TEMPLATE;
     sentCount = result.sentCount || 0;
     updateCounters();
   }
 
-  // Save settings to storage
   async function saveSettingsToStorage() {
     await chrome.storage.local.set({
-      apiKey: apiKeyField.value,
-      fromNumber: fromNumberField.value,
       messageTemplate: messageTemplate.value || DEFAULT_TEMPLATE
     });
     
-    // Visual feedback
     saveSettings.textContent = 'Saved!';
     saveSettings.classList.add('saved');
     setTimeout(() => {
@@ -120,40 +248,44 @@ document.addEventListener('DOMContentLoaded', () => {
     }, 1500);
   }
 
-  // Save sent count
   async function saveSentCount() {
     await chrome.storage.local.set({ sentCount });
   }
 
-  // Toggle settings panel
   function toggleSettings() {
     settingsPanel.classList.toggle('open');
   }
 
-  // Update status bar
+  // =====================
+  // STATUS & UI
+  // =====================
+  
   function updateStatus(message, type = '') {
     const statusText = statusBar.querySelector('.status-text');
     statusText.textContent = message;
     statusBar.className = 'status-bar ' + type;
   }
 
-  // Scrape data from the current page
+  // =====================
+  // SCRAPING
+  // =====================
+  
   async function scrapeData() {
     scrapeBtn.classList.add('loading');
     updateStatus('Scraping page...', '');
 
     try {
-      // Get the current active tab
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
 
-      // Check if we're on a Kijiji page
       if (!tab.url || !tab.url.includes('kijiji.ca')) {
         updateStatus('Not a Kijiji page', 'error');
         scrapeBtn.classList.remove('loading');
         return;
       }
 
-      // Execute the content script and get results
+      // Capture the listing URL
+      urlField.value = tab.url;
+
       const results = await chrome.scripting.executeScript({
         target: { tabId: tab.id },
         func: scrapeKijijiData
@@ -162,18 +294,10 @@ document.addEventListener('DOMContentLoaded', () => {
       const data = results[0]?.result;
 
       if (data) {
-        // Populate fields with scraped data
-        if (data.name) {
-          nameField.value = data.name;
-        }
-        if (data.model) {
-          modelField.value = data.model;
-        }
-        if (data.phone) {
-          phoneField.value = data.phone;
-        }
+        if (data.name) nameField.value = data.name;
+        if (data.model) modelField.value = data.model;
+        if (data.phone) phoneField.value = data.phone;
 
-        // Count how many fields were found
         const foundCount = [data.name, data.model, data.phone].filter(Boolean).length;
         
         if (foundCount > 0) {
@@ -192,7 +316,6 @@ document.addEventListener('DOMContentLoaded', () => {
     scrapeBtn.classList.remove('loading');
   }
 
-  // Function that runs in the page context to scrape data
   function scrapeKijijiData() {
     const data = {
       name: null,
@@ -200,7 +323,7 @@ document.addEventListener('DOMContentLoaded', () => {
       phone: null
     };
 
-    // Scrape seller name from profile link
+    // Scrape seller name
     const nameLink = document.querySelector('h3 a[href^="/o-profile/"]');
     if (nameLink) {
       data.name = nameLink.textContent.trim();
@@ -241,24 +364,16 @@ document.addEventListener('DOMContentLoaded', () => {
     return data;
   }
 
-  // Add message to queue
+  // =====================
+  // SEND MESSAGE
+  // =====================
+  
   async function addToQueue() {
-    const settings = await chrome.storage.local.get(['apiKey', 'fromNumber', 'messageTemplate']);
-    
-    // Validate settings
-    if (!settings.apiKey) {
-      updateStatus('API key not set - open settings', 'error');
-      settingsPanel.classList.add('open');
+    if (!authToken) {
+      updateStatus('Please sign in first', 'error');
       return;
     }
     
-    if (!settings.fromNumber) {
-      updateStatus('From number not set - open settings', 'error');
-      settingsPanel.classList.add('open');
-      return;
-    }
-    
-    // Validate and format phone number
     const rawPhone = phoneField.value.trim();
     if (!rawPhone) {
       updateStatus('No phone number to send to', 'error');
@@ -266,31 +381,28 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     const toNumber = formatPhoneNumber(rawPhone);
 
-    // Build message from template
-    const template = settings.messageTemplate || DEFAULT_TEMPLATE;
+    const stored = await chrome.storage.local.get(['messageTemplate']);
+    const template = stored.messageTemplate || DEFAULT_TEMPLATE;
     
-    // First replace placeholders [Customer Name] and [Models]
+    // Replace placeholders then process spintax
     let message = template
       .replace(/\[Customer Name\]/gi, nameField.value || 'there')
       .replace(/\[Models?\]/gi, modelField.value || 'your vehicle');
-    
-    // Then process spintax to randomly select options
     message = processSpintax(message);
 
-    // Add to queue (format from number too)
+    // Add to queue with all metadata
     messageQueue.push({
       to: toNumber,
-      from: formatPhoneNumber(settings.fromNumber),
       content: message,
-      apiKey: settings.apiKey,
-      name: nameField.value,
-      model: modelField.value
+      seller_name: nameField.value || null,
+      vehicle_model: modelField.value || null,
+      listing_url: urlField.value || null,
     });
 
     updateCounters();
     updateStatus(`Added to queue (${messageQueue.length} pending)`, 'success');
 
-    // Visual feedback on button
+    // Visual feedback
     sendBtn.innerHTML = `
       <span>Added!</span>
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -307,13 +419,11 @@ document.addEventListener('DOMContentLoaded', () => {
       `;
     }, 1000);
 
-    // Start processing queue if not already
     if (!isProcessing) {
       processQueue();
     }
   }
 
-  // Process the message queue
   async function processQueue() {
     if (isProcessing || messageQueue.length === 0) return;
     
@@ -323,47 +433,50 @@ document.addEventListener('DOMContentLoaded', () => {
     while (messageQueue.length > 0) {
       const msg = messageQueue[0];
       
-      // Set next send time for countdown
       const delay = getRandomDelay();
       nextSendTime = Date.now() + delay;
       updateTimer();
 
-      // Wait for the delay
       await new Promise(resolve => setTimeout(resolve, delay));
 
-      // Send the message
       try {
-        updateStatus(`Sending to ${msg.name || msg.to}...`, '');
+        updateStatus(`Sending to ${msg.seller_name || msg.to}...`, '');
         
-        const response = await fetch('https://api.httpsms.com/v1/messages/send', {
+        const response = await fetch(`${API_BASE}/api/extension/send`, {
           method: 'POST',
           headers: {
-            'x-api-key': msg.apiKey,
-            'Accept': 'application/json',
-            'Content-Type': 'application/json'
+            'Authorization': `Bearer ${authToken}`,
+            'Content-Type': 'application/json',
           },
           body: JSON.stringify({
+            to: msg.to,
             content: msg.content,
-            from: msg.from,
-            to: msg.to
-          })
+            seller_name: msg.seller_name,
+            vehicle_model: msg.vehicle_model,
+            listing_url: msg.listing_url,
+          }),
         });
 
         const data = await response.json();
 
-        if (response.ok && data.status === 'success') {
+        if (response.ok && data.success) {
           sentCount++;
           saveSentCount();
-          updateStatus(`Sent to ${msg.name || msg.to}!`, 'success');
+          updateStatus(`Sent to ${msg.seller_name || msg.to}!`, 'success');
         } else {
-          throw new Error(data.message || 'Failed to send SMS');
+          throw new Error(data.error || 'Failed to send SMS');
         }
       } catch (error) {
         console.error('SMS error:', error);
         updateStatus(`Failed: ${error.message}`, 'error');
+        
+        // If auth error, redirect to login
+        if (error.message.includes('token') || error.message.includes('Unauthorized')) {
+          logout();
+          return;
+        }
       }
 
-      // Remove from queue
       messageQueue.shift();
       updateCounters();
     }
@@ -380,28 +493,33 @@ document.addEventListener('DOMContentLoaded', () => {
     updateStatus('Queue complete!', 'success');
   }
 
-  // Event listeners
+  // =====================
+  // EVENT LISTENERS
+  // =====================
+  
+  loginForm.addEventListener('submit', (e) => {
+    e.preventDefault();
+    login(loginEmail.value, loginPassword.value);
+  });
+  
+  logoutBtn.addEventListener('click', logout);
   scrapeBtn.addEventListener('click', scrapeData);
   sendBtn.addEventListener('click', addToQueue);
   settingsBtn.addEventListener('click', toggleSettings);
   closeSettings.addEventListener('click', toggleSettings);
   saveSettings.addEventListener('click', saveSettingsToStorage);
 
-  // Load settings on startup
-  loadSettings();
-
-  // Auto-scrape when panel opens
-  scrapeData();
-
-  // Listen for tab changes to auto-scrape when switching tabs
+  // Tab change listeners
   chrome.tabs.onActivated.addListener(() => {
-    scrapeData();
+    if (currentUser) scrapeData();
   });
 
-  // Listen for page updates to auto-scrape when navigating
   chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
-    if (changeInfo.status === 'complete' && tab.url && tab.url.includes('kijiji.ca')) {
+    if (changeInfo.status === 'complete' && tab.url && tab.url.includes('kijiji.ca') && currentUser) {
       scrapeData();
     }
   });
+
+  // Initialize
+  checkAuth();
 });

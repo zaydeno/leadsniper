@@ -4,7 +4,20 @@ import { useState, useRef, useEffect } from 'react';
 import { Thread, Message, Profile } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
-import { Send, Phone, User, Check, CheckCheck, Clock, AlertCircle } from 'lucide-react';
+import { 
+  Send, 
+  Phone, 
+  User, 
+  Check, 
+  CheckCheck, 
+  Clock, 
+  AlertCircle,
+  Car,
+  ExternalLink,
+  UserCircle,
+  ChevronDown,
+  ChevronUp
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { toast } from 'sonner';
@@ -26,8 +39,13 @@ export function ChatWindow({
 }: ChatWindowProps) {
   const [newMessage, setNewMessage] = useState('');
   const [isSending, setIsSending] = useState(false);
+  const [showDetails, setShowDetails] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  // Extract metadata
+  const metadata = thread.metadata || {};
+  const hasMetadata = metadata.seller_name || metadata.vehicle_model || metadata.listing_url || metadata.initiated_by_name;
 
   // Auto-scroll to bottom on new messages
   useEffect(() => {
@@ -69,26 +87,113 @@ export function ChatWindow({
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
-      <div className="h-16 px-6 flex items-center justify-between border-b border-gray-800/50 bg-[#12121a]">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-full bg-emerald-500/20 flex items-center justify-center">
-            <User className="w-5 h-5 text-emerald-400" />
+      <div className="px-6 py-4 border-b border-gray-800/50 bg-[#12121a]">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-full bg-emerald-500/20 flex items-center justify-center">
+              <User className="w-5 h-5 text-emerald-400" />
+            </div>
+            <div>
+              <h2 className="font-semibold text-white">
+                {thread.contact_name || metadata.seller_name || formatPhoneNumber(thread.contact_phone)}
+              </h2>
+              <p className="text-xs text-gray-500">{thread.contact_phone}</p>
+            </div>
           </div>
-          <div>
-            <h2 className="font-semibold text-white">
-              {thread.contact_name || formatPhoneNumber(thread.contact_phone)}
-            </h2>
-            <p className="text-xs text-gray-500">{thread.contact_phone}</p>
+          <div className="flex items-center gap-2">
+            {hasMetadata && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-gray-400 hover:text-emerald-400 hover:bg-emerald-500/10 text-xs"
+                onClick={() => setShowDetails(!showDetails)}
+              >
+                Details
+                {showDetails ? (
+                  <ChevronUp className="w-4 h-4 ml-1" />
+                ) : (
+                  <ChevronDown className="w-4 h-4 ml-1" />
+                )}
+              </Button>
+            )}
+            <Button
+              variant="ghost"
+              size="icon"
+              className="text-gray-400 hover:text-emerald-400 hover:bg-emerald-500/10"
+              onClick={() => window.open(`tel:${thread.contact_phone}`)}
+            >
+              <Phone className="w-5 h-5" />
+            </Button>
           </div>
         </div>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="text-gray-400 hover:text-emerald-400 hover:bg-emerald-500/10"
-          onClick={() => window.open(`tel:${thread.contact_phone}`)}
-        >
-          <Phone className="w-5 h-5" />
-        </Button>
+
+        {/* Lead Details Panel */}
+        {showDetails && hasMetadata && (
+          <div className="mt-4 p-4 bg-[#0a0a0f] rounded-xl border border-gray-800/50 space-y-3 animate-in slide-in-from-top-2 duration-200">
+            <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Lead Details</h3>
+            
+            <div className="grid grid-cols-2 gap-4">
+              {metadata.seller_name && (
+                <div className="flex items-start gap-2">
+                  <User className="w-4 h-4 text-emerald-400 mt-0.5 shrink-0" />
+                  <div>
+                    <p className="text-xs text-gray-500">Seller Name</p>
+                    <p className="text-sm text-white">{metadata.seller_name}</p>
+                  </div>
+                </div>
+              )}
+
+              {metadata.vehicle_model && (
+                <div className="flex items-start gap-2">
+                  <Car className="w-4 h-4 text-emerald-400 mt-0.5 shrink-0" />
+                  <div>
+                    <p className="text-xs text-gray-500">Vehicle</p>
+                    <p className="text-sm text-white">{metadata.vehicle_model}</p>
+                  </div>
+                </div>
+              )}
+
+              {metadata.initiated_by_name && (
+                <div className="flex items-start gap-2">
+                  <UserCircle className="w-4 h-4 text-emerald-400 mt-0.5 shrink-0" />
+                  <div>
+                    <p className="text-xs text-gray-500">Started By</p>
+                    <p className="text-sm text-white">{metadata.initiated_by_name}</p>
+                    {metadata.initiated_at && (
+                      <p className="text-xs text-gray-500">
+                        {format(new Date(metadata.initiated_at), 'MMM d, yyyy h:mm a')}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {metadata.source && (
+                <div className="flex items-start gap-2">
+                  <ExternalLink className="w-4 h-4 text-emerald-400 mt-0.5 shrink-0" />
+                  <div>
+                    <p className="text-xs text-gray-500">Source</p>
+                    <p className="text-sm text-white capitalize">{metadata.source}</p>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {metadata.listing_url && (
+              <a
+                href={metadata.listing_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-2 w-full p-3 mt-2 bg-emerald-500/10 hover:bg-emerald-500/20 rounded-lg border border-emerald-500/20 transition-colors group"
+              >
+                <ExternalLink className="w-4 h-4 text-emerald-400 group-hover:text-emerald-300" />
+                <span className="text-sm text-emerald-400 group-hover:text-emerald-300 truncate">
+                  View Original Listing
+                </span>
+              </a>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Messages */}
@@ -108,6 +213,7 @@ export function ChatWindow({
               const showDate = index === 0 || 
                 new Date(message.created_at).toDateString() !== 
                 new Date(messages[index - 1].created_at).toDateString();
+              const msgMeta = message.metadata || {};
 
               return (
                 <div key={message.id}>
@@ -118,6 +224,17 @@ export function ChatWindow({
                       </span>
                     </div>
                   )}
+                  
+                  {/* Show initial outreach badge */}
+                  {msgMeta.is_initial_outreach && isOutbound && (
+                    <div className="flex justify-end mb-1">
+                      <span className="text-xs text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full">
+                        Initial Outreach
+                        {msgMeta.sent_by_name && ` • ${msgMeta.sent_by_name}`}
+                      </span>
+                    </div>
+                  )}
+
                   <div className={cn(
                     'flex',
                     isOutbound ? 'justify-end' : 'justify-start'
@@ -193,9 +310,12 @@ function MessageStatus({ status }: { status: Message['status'] }) {
       return <Clock className="w-3 h-3 text-emerald-100/50" />;
     case 'sent':
       return <Check className="w-3 h-3 text-emerald-100/70" />;
+    case 'delivered':
+      return <CheckCheck className="w-3 h-3 text-emerald-100" />;
     case 'received':
       return <CheckCheck className="w-3 h-3 text-emerald-100" />;
     case 'failed':
+    case 'expired':
       return <AlertCircle className="w-3 h-3 text-red-400" />;
     default:
       return null;
@@ -212,4 +332,3 @@ function formatPhoneNumber(phone: string): string {
   }
   return phone;
 }
-

@@ -103,8 +103,13 @@ export interface Thread {
 }
 
 export interface ThreadMetadata {
+  seller_name?: string;
   vehicle_model?: string;
+  listing_url?: string;
   source?: string;
+  initiated_by?: string;
+  initiated_by_name?: string;
+  initiated_at?: string;
   [key: string]: unknown;
 }
 

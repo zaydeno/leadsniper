@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Kijiji Lead Scraper",
-  "version": "1.0.0",
-  "description": "Scrape listing details from Kijiji for lead management",
+  "name": "LeadSniper",
+  "version": "2.0.0",
+  "description": "Scrape Kijiji listings and send SMS leads through LeadSniper",
   "permissions": [
     "activeTab",
     "scripting",
@@ -11,7 +11,9 @@
     "storage"
   ],
   "host_permissions": [
-    "https://www.kijiji.ca/*"
+    "https://www.kijiji.ca/*",
+    "https://leadsniperpublic.vercel.app/*",
+    "https://leadsniper.xyz/*"
   ],
   "side_panel": {
     "default_path": "sidepanel.html"

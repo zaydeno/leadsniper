@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Kijiji Lead Scraper</title>
+  <title>LeadSniper</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -11,147 +11,192 @@
 </head>
 <body>
   <div class="container">
-    <header class="header">
-      <div class="logo">
-        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <rect width="24" height="24" rx="6" fill="url(#gradient)"/>
+    <!-- Login Screen -->
+    <div id="loginScreen" class="login-screen">
+      <div class="login-header">
+        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <rect width="24" height="24" rx="6" fill="url(#gradient-login)"/>
           <path d="M7 12L10.5 15.5L17 9" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
           <defs>
-            <linearGradient id="gradient" x1="0" y1="0" x2="24" y2="24" gradientUnits="userSpaceOnUse">
+            <linearGradient id="gradient-login" x1="0" y1="0" x2="24" y2="24" gradientUnits="userSpaceOnUse">
               <stop stop-color="#10B981"/>
               <stop offset="1" stop-color="#059669"/>
             </linearGradient>
           </defs>
         </svg>
-        <span class="logo-text">LeadScraper</span>
+        <h1 class="login-title">LeadSniper</h1>
+        <p class="login-subtitle">Sign in to continue</p>
       </div>
-      <div class="header-actions">
-        <button id="settingsBtn" class="scrape-btn" title="Settings">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <circle cx="12" cy="12" r="3"/>
-            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
-          </svg>
+      <form id="loginForm" class="login-form">
+        <div class="field-group">
+          <label class="field-label">Email</label>
+          <input type="email" id="loginEmail" class="field-input" placeholder="you@company.com" required>
+        </div>
+        <div class="field-group">
+          <label class="field-label">Password</label>
+          <input type="password" id="loginPassword" class="field-input" placeholder="••••••••" required>
+        </div>
+        <div id="loginError" class="login-error"></div>
+        <button type="submit" id="loginBtn" class="login-btn">
+          <span>Sign In</span>
         </button>
-        <button id="scrapeBtn" class="scrape-btn" title="Scrape Page">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
-            <path d="M3 3v5h5"/>
-            <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/>
-            <path d="M16 16h5v5"/>
-          </svg>
-        </button>
-      </div>
-    </header>
-
-    <div class="status-bar" id="statusBar">
-      <span class="status-dot"></span>
-      <span class="status-text">Ready to scrape</span>
+      </form>
     </div>
 
-    <!-- Settings Panel -->
-    <div class="settings-panel" id="settingsPanel">
-      <div class="settings-header">
-        <span>API Settings</span>
-        <button id="closeSettings" class="close-settings-btn">
+    <!-- Main App Screen -->
+    <div id="appScreen" class="app-screen" style="display: none;">
+      <header class="header">
+        <div class="logo">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <rect width="24" height="24" rx="6" fill="url(#gradient)"/>
+            <path d="M7 12L10.5 15.5L17 9" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+            <defs>
+              <linearGradient id="gradient" x1="0" y1="0" x2="24" y2="24" gradientUnits="userSpaceOnUse">
+                <stop stop-color="#10B981"/>
+                <stop offset="1" stop-color="#059669"/>
+              </linearGradient>
+            </defs>
+          </svg>
+          <span class="logo-text">LeadSniper</span>
+        </div>
+        <div class="header-actions">
+          <button id="settingsBtn" class="scrape-btn" title="Settings">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="3"/>
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+            </svg>
+          </button>
+          <button id="scrapeBtn" class="scrape-btn" title="Scrape Page">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
+              <path d="M3 3v5h5"/>
+              <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/>
+              <path d="M16 16h5v5"/>
+            </svg>
+          </button>
+        </div>
+      </header>
+
+      <!-- User Info Bar -->
+      <div class="user-bar" id="userBar">
+        <div class="user-info">
+          <span class="user-avatar" id="userAvatar">Z</span>
+          <div class="user-details">
+            <span class="user-name" id="userName">Loading...</span>
+            <span class="user-org" id="userOrg">-</span>
+          </div>
+        </div>
+        <button id="logoutBtn" class="logout-btn" title="Sign Out">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <line x1="18" y1="6" x2="6" y2="18"/>
-            <line x1="6" y1="6" x2="18" y2="18"/>
+            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+            <polyline points="16 17 21 12 16 7"/>
+            <line x1="21" y1="12" x2="9" y2="12"/>
           </svg>
         </button>
       </div>
-      <div class="settings-body">
+
+      <div class="status-bar" id="statusBar">
+        <span class="status-dot"></span>
+        <span class="status-text">Ready to scrape</span>
+      </div>
+
+      <!-- Settings Panel -->
+      <div class="settings-panel" id="settingsPanel">
+        <div class="settings-header">
+          <span>Message Settings</span>
+          <button id="closeSettings" class="close-settings-btn">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18"/>
+              <line x1="6" y1="6" x2="18" y2="18"/>
+            </svg>
+          </button>
+        </div>
+        <div class="settings-body">
+          <div class="field-group">
+            <label class="field-label">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+              </svg>
+              Message Template
+            </label>
+            <textarea id="messageTemplate" class="field-input field-textarea" placeholder="{Hi|Hello|Hey} [Customer Name]! Interested in your [Models]..."></textarea>
+            <p class="field-hint">Use [Customer Name] and [Models] as placeholders. {opt1|opt2} for random selection.</p>
+          </div>
+          <button id="saveSettings" class="save-settings-btn">Save Settings</button>
+        </div>
+      </div>
+
+      <main class="fields">
         <div class="field-group">
           <label class="field-label">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
-              <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+              <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+              <circle cx="12" cy="7" r="4"/>
             </svg>
-            API Key
+            Seller Name
           </label>
-          <input type="password" id="apiKeyField" class="field-input" placeholder="Enter your httpSMS API key...">
+          <input type="text" id="nameField" class="field-input" placeholder="Click refresh to scrape...">
         </div>
+
+        <div class="field-group">
+          <label class="field-label">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="1" y="3" width="15" height="13" rx="2"/>
+              <polygon points="16 8 22 12 16 16 16 8"/>
+            </svg>
+            Vehicle Model
+          </label>
+          <input type="text" id="modelField" class="field-input" placeholder="Click refresh to scrape...">
+        </div>
+
         <div class="field-group">
           <label class="field-label">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/>
             </svg>
-            From Number
+            Phone Number
           </label>
-          <input type="text" id="fromNumberField" class="field-input" placeholder="+1234567890">
+          <input type="text" id="phoneField" class="field-input" placeholder="Click refresh to scrape...">
         </div>
+
         <div class="field-group">
           <label class="field-label">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+              <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
+              <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
             </svg>
-            Message Template
+            Listing URL
           </label>
-          <textarea id="messageTemplate" class="field-input field-textarea" placeholder="{Hi|Hello|Hey} [Customer Name]! Interested in your [Models]..."></textarea>
+          <input type="text" id="urlField" class="field-input" placeholder="Auto-captured from page" readonly>
         </div>
-        <button id="saveSettings" class="save-settings-btn">Save Settings</button>
-      </div>
+      </main>
+
+      <footer class="footer">
+        <div class="stats-bar">
+          <div class="stat">
+            <span class="stat-label">Queue</span>
+            <span class="stat-value" id="queueCount">0</span>
+          </div>
+          <div class="stat">
+            <span class="stat-label">Sent</span>
+            <span class="stat-value stat-success" id="sentCount">0</span>
+          </div>
+          <div class="stat stat-timer" id="timerStat">
+            <span class="stat-label">Next in</span>
+            <span class="stat-value" id="timerCount">--</span>
+          </div>
+        </div>
+        <button id="sendBtn" class="send-btn">
+          <span>Add to Queue</span>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="12" y1="5" x2="12" y2="19"/>
+            <line x1="5" y1="12" x2="19" y2="12"/>
+          </svg>
+        </button>
+      </footer>
     </div>
-
-    <main class="fields">
-      <div class="field-group">
-        <label class="field-label">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
-            <circle cx="12" cy="7" r="4"/>
-          </svg>
-          Seller Name
-        </label>
-        <input type="text" id="nameField" class="field-input" placeholder="Click refresh to scrape...">
-      </div>
-
-      <div class="field-group">
-        <label class="field-label">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <rect x="1" y="3" width="15" height="13" rx="2"/>
-            <polygon points="16 8 22 12 16 16 16 8"/>
-          </svg>
-          Vehicle Model
-        </label>
-        <input type="text" id="modelField" class="field-input" placeholder="Click refresh to scrape...">
-      </div>
-
-      <div class="field-group">
-        <label class="field-label">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/>
-          </svg>
-          Phone Number
-        </label>
-        <input type="text" id="phoneField" class="field-input" placeholder="Click refresh to scrape...">
-      </div>
-    </main>
-
-    <footer class="footer">
-      <div class="stats-bar">
-        <div class="stat">
-          <span class="stat-label">Queue</span>
-          <span class="stat-value" id="queueCount">0</span>
-        </div>
-        <div class="stat">
-          <span class="stat-label">Sent</span>
-          <span class="stat-value stat-success" id="sentCount">0</span>
-        </div>
-        <div class="stat stat-timer" id="timerStat">
-          <span class="stat-label">Next in</span>
-          <span class="stat-value" id="timerCount">--</span>
-        </div>
-      </div>
-      <button id="sendBtn" class="send-btn">
-        <span>Add to Queue</span>
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <line x1="12" y1="5" x2="12" y2="19"/>
-          <line x1="5" y1="12" x2="19" y2="12"/>
-        </svg>
-      </button>
-    </footer>
   </div>
 
   <script src="sidepanel.js"></script>
 </body>
 </html>
-
