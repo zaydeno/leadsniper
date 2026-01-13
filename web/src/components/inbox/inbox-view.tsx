@@ -191,24 +191,26 @@ export function InboxView({ initialThreads, userProfile }: InboxViewProps) {
   };
 
   return (
-    <div className="h-screen flex">
+    <div className="h-screen flex overflow-hidden">
       {/* Thread list */}
-      <div className="w-80 border-r border-gray-800/50 flex flex-col bg-[#0f0f17]">
-        <div className="h-16 px-4 flex items-center border-b border-gray-800/50">
+      <div className="w-80 border-r border-gray-800/50 flex flex-col bg-[#0f0f17] overflow-hidden">
+        <div className="h-16 px-4 flex items-center border-b border-gray-800/50 flex-shrink-0">
           <h1 className="text-lg font-semibold text-white">Inbox</h1>
           <span className="ml-2 px-2 py-0.5 text-xs font-medium bg-emerald-500/10 text-emerald-400 rounded-full">
             {threads.length}
           </span>
         </div>
-        <ThreadList
-          threads={threads}
-          selectedThread={selectedThread}
-          onSelectThread={setSelectedThread}
-        />
+        <div className="flex-1 overflow-hidden">
+          <ThreadList
+            threads={threads}
+            selectedThread={selectedThread}
+            onSelectThread={setSelectedThread}
+          />
+        </div>
       </div>
 
       {/* Chat window */}
-      <div className="flex-1 flex flex-col bg-[#0a0a0f]">
+      <div className="flex-1 flex flex-col bg-[#0a0a0f] overflow-hidden">
         {selectedThread ? (
           <ChatWindow
             thread={selectedThread}

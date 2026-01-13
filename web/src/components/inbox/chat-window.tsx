@@ -165,9 +165,9 @@ export function ChatWindow({
   };
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full overflow-hidden">
       {/* Header */}
-      <div className="px-6 py-4 border-b border-gray-800/50 bg-[#12121a]">
+      <div className="px-6 py-4 border-b border-gray-800/50 bg-[#12121a] flex-shrink-0">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-full bg-emerald-500/20 flex items-center justify-center">
@@ -386,7 +386,8 @@ export function ChatWindow({
       </div>
 
       {/* Messages */}
-      <ScrollArea className="flex-1 p-4">
+      <div className="flex-1 overflow-hidden">
+        <ScrollArea className="h-full p-4">
         {isLoading ? (
           <div className="flex items-center justify-center h-full">
             <div className="w-8 h-8 border-2 border-emerald-500/30 border-t-emerald-500 rounded-full animate-spin" />
@@ -463,10 +464,11 @@ export function ChatWindow({
             <div ref={messagesEndRef} />
           </div>
         )}
-      </ScrollArea>
+        </ScrollArea>
+      </div>
 
       {/* Input */}
-      <div className="p-4 border-t border-gray-800/50 bg-[#12121a]">
+      <div className="p-4 border-t border-gray-800/50 bg-[#12121a] flex-shrink-0">
         <form onSubmit={handleSubmit} className="flex items-end gap-3">
           <div className="flex-1 relative">
             <textarea

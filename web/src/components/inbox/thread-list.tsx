@@ -27,7 +27,7 @@ export function ThreadList({ threads, selectedThread, onSelectThread }: ThreadLi
   }
 
   return (
-    <ScrollArea className="flex-1">
+    <ScrollArea className="h-full">
       <div className="p-2 space-y-1">
         {threads.map((thread) => (
           <button
