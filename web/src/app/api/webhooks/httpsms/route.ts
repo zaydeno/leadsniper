@@ -214,12 +214,12 @@ async function handleMessageFailed(
   const httpsmsId = data.id as string;
   const reason = data.failure_reason as string;
 
+  // First update the status
   const { error } = await supabase
     .from('messages')
     .update({
       status: 'failed',
       updated_at: new Date().toISOString(),
-      metadata: supabase.rpc ? undefined : { failure_reason: reason },
     })
     .eq('httpsms_id', httpsmsId);
 
@@ -227,14 +227,18 @@ async function handleMessageFailed(
     console.error('Error updating message to failed:', error);
   }
 
-  // Also update with failure reason in metadata
-  await supabase.rpc('update_message_metadata', {
-    p_httpsms_id: httpsmsId,
-    p_key: 'failure_reason',
-    p_value: reason,
-  }).catch(() => {
-    // RPC might not exist, that's okay
-  });
+  // Update metadata with failure reason using raw SQL via RPC if available
+  if (reason) {
+    await supabase
+      .from('messages')
+      .update({
+        metadata: { failure_reason: reason },
+      })
+      .eq('httpsms_id', httpsmsId)
+      .catch(() => {
+        // Ignore metadata update errors
+      });
+  }
 
   console.log(`❌ SMS failed: ${httpsmsId} - ${reason}`);
   return { success: true, type: 'message_failed' };
