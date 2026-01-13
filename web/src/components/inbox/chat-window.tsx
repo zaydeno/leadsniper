@@ -213,7 +213,11 @@ export function ChatWindow({
               const showDate = index === 0 || 
                 new Date(message.created_at).toDateString() !== 
                 new Date(messages[index - 1].created_at).toDateString();
-              const msgMeta = message.metadata || {};
+              const msgMeta = (message.metadata || {}) as {
+                is_initial_outreach?: boolean;
+                sent_by_name?: string;
+                source?: string;
+              };
 
               return (
                 <div key={message.id}>
