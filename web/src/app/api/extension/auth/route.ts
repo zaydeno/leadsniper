@@ -36,9 +36,17 @@ export async function POST(request: NextRequest) {
       .eq('id', authData.user.id)
       .single();
 
-    if (profileError || !profile) {
+    if (profileError) {
+      console.error('Profile fetch error:', profileError);
       return NextResponse.json(
-        { error: 'User profile not found' },
+        { error: `Profile error: ${profileError.message}` },
+        { status: 404 }
+      );
+    }
+
+    if (!profile) {
+      return NextResponse.json(
+        { error: 'User profile not found in database' },
         { status: 404 }
       );
     }
