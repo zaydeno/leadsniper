@@ -50,6 +50,7 @@ document.addEventListener('DOMContentLoaded', () => {
   let isProcessing = false;
   let countdownInterval = null;
   let nextSendTime = null;
+  let lastSentTime = 0; // Track when we last sent a message
 
   // Default message template with spintax
   const DEFAULT_TEMPLATE = `{Hi|Hello|Hey|Hi there} [Customer Name]! {It's|This is} Zayden O'Gorman, {the|your} acquisition manager {at|from} Stony Plain Chrysler. {We're looking to|My team and I want to} {refresh|update} our {inventory|pre-owned stock} and {[Models] are|the [Models] is} {at the top of our list|in high demand right now}. We {are offering|can offer} {wholesale value|top market value} + a $1000 {Bonus|Trade-In Credit} if you {would be|are} {willing to consider|open to} trading {it|your vehicle} in {to our dealership|to us}. I {can also|could also} {get|secure} you a {pretty good|fantastic} deal on {any|a} new or {certified pre-owned|CPO} vehicle {on our lot|in stock}. {Would you be interested in hearing|Are you open to seeing|Would you want to hear} what we {can offer you|have to offer}?`;
@@ -250,9 +251,10 @@ document.addEventListener('DOMContentLoaded', () => {
   // =====================
   
   async function loadSettings() {
-    const result = await chrome.storage.local.get(['messageTemplate', 'sentCount']);
+    const result = await chrome.storage.local.get(['messageTemplate', 'sentCount', 'lastSentTime']);
     messageTemplate.value = result.messageTemplate || DEFAULT_TEMPLATE;
     sentCount = result.sentCount || 0;
+    lastSentTime = result.lastSentTime || 0;
     updateCounters();
   }
 
@@ -270,7 +272,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   async function saveSentCount() {
-    await chrome.storage.local.set({ sentCount });
+    await chrome.storage.local.set({ sentCount, lastSentTime });
   }
 
   function toggleSettings() {
@@ -411,37 +413,119 @@ document.addEventListener('DOMContentLoaded', () => {
       .replace(/\[Models?\]/gi, modelField.value || 'your vehicle');
     message = processSpintax(message);
 
-    // Add to queue with all metadata
-    messageQueue.push({
+    const msgData = {
       to: toNumber,
       content: message,
       seller_name: nameField.value || null,
       vehicle_model: modelField.value || null,
       listing_url: urlField.value || null,
-    });
+    };
 
-    updateCounters();
-    updateStatus(`Added to queue (${messageQueue.length} pending)`, 'success');
+    // Check if we should send instantly (no message sent in last 60 seconds)
+    const timeSinceLastSend = Date.now() - lastSentTime;
+    const shouldSendInstantly = timeSinceLastSend >= 60000; // 60 seconds
 
-    // Visual feedback
-    sendBtn.innerHTML = `
-      <span>Added!</span>
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <polyline points="20 6 9 17 4 12"/>
-      </svg>
-    `;
-    setTimeout(() => {
+    if (shouldSendInstantly && !isProcessing) {
+      // Send instantly
+      await sendMessageInstantly(msgData);
+    } else {
+      // Add to queue
+      messageQueue.push(msgData);
+      updateCounters();
+      updateStatus(`Added to queue (${messageQueue.length} pending)`, 'success');
+
+      // Visual feedback
       sendBtn.innerHTML = `
-        <span>Add to Queue</span>
+        <span>Added!</span>
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <line x1="12" y1="5" x2="12" y2="19"/>
-          <line x1="5" y1="12" x2="19" y2="12"/>
+          <polyline points="20 6 9 17 4 12"/>
         </svg>
       `;
-    }, 1000);
+      setTimeout(() => {
+        sendBtn.innerHTML = `
+          <span>Add to Queue</span>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="12" y1="5" x2="12" y2="19"/>
+            <line x1="5" y1="12" x2="19" y2="12"/>
+          </svg>
+        `;
+      }, 1000);
 
-    if (!isProcessing) {
-      processQueue();
+      if (!isProcessing) {
+        processQueue();
+      }
+    }
+  }
+
+  // Send a message instantly (no queue delay)
+  async function sendMessageInstantly(msg) {
+    sendBtn.disabled = true;
+    sendBtn.innerHTML = `
+      <span>Sending...</span>
+      <svg class="spinning" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
+      </svg>
+    `;
+    updateStatus(`Sending to ${msg.seller_name || msg.to}...`, '');
+
+    try {
+      const response = await fetch(`${API_BASE}/api/extension/send`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${authToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          to: msg.to,
+          content: msg.content,
+          organizationId: currentUser.organization_id,
+          metadata: {
+            seller_name: msg.seller_name,
+            vehicle_model: msg.vehicle_model,
+            kijiji_listing_url: msg.listing_url,
+            is_initial_outreach: true,
+          },
+        }),
+      });
+
+      const data = await response.json();
+
+      if (response.ok && data.success) {
+        sentCount++;
+        lastSentTime = Date.now(); // Update last sent time
+        saveSentCount();
+        updateCounters();
+        updateStatus(`Sent to ${msg.seller_name || msg.to}!`, 'success');
+        
+        // Success feedback
+        sendBtn.innerHTML = `
+          <span>Sent!</span>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="20 6 9 17 4 12"/>
+          </svg>
+        `;
+      } else {
+        throw new Error(data.error || 'Failed to send SMS');
+      }
+    } catch (error) {
+      console.error('SMS error:', error);
+      updateStatus(`Failed: ${error.message}`, 'error');
+      
+      if (error.message.includes('token') || error.message.includes('Unauthorized')) {
+        logout();
+        return;
+      }
+    } finally {
+      setTimeout(() => {
+        sendBtn.disabled = false;
+        sendBtn.innerHTML = `
+          <span>Add to Queue</span>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="12" y1="5" x2="12" y2="19"/>
+            <line x1="5" y1="12" x2="19" y2="12"/>
+          </svg>
+        `;
+      }, 1000);
     }
   }
 
@@ -480,27 +564,28 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const data = await response.json();
 
-        if (response.ok && data.success) {
-          sentCount++;
-          saveSentCount();
-          updateStatus(`Sent to ${msg.seller_name || msg.to}!`, 'success');
-        } else {
-          throw new Error(data.error || 'Failed to send SMS');
+          if (response.ok && data.success) {
+            sentCount++;
+            lastSentTime = Date.now(); // Update last sent time
+            saveSentCount();
+            updateStatus(`Sent to ${msg.seller_name || msg.to}!`, 'success');
+          } else {
+            throw new Error(data.error || 'Failed to send SMS');
+          }
+        } catch (error) {
+          console.error('SMS error:', error);
+          updateStatus(`Failed: ${error.message}`, 'error');
+          
+          // If auth error, redirect to login
+          if (error.message.includes('token') || error.message.includes('Unauthorized')) {
+            logout();
+            return;
+          }
         }
-      } catch (error) {
-        console.error('SMS error:', error);
-        updateStatus(`Failed: ${error.message}`, 'error');
-        
-        // If auth error, redirect to login
-        if (error.message.includes('token') || error.message.includes('Unauthorized')) {
-          logout();
-          return;
-        }
-      }
 
-      messageQueue.shift();
-      updateCounters();
-    }
+        messageQueue.shift();
+        updateCounters();
+      }
 
     isProcessing = false;
     nextSendTime = null;
