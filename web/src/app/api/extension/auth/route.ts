@@ -50,7 +50,7 @@ export async function POST(request: NextRequest) {
       user: {
         id: authData.user.id,
         email: authData.user.email,
-        name: profile.name,
+        name: profile.full_name || profile.username || authData.user.email,
         role: profile.role,
         organization_id: profile.organization_id,
         organization_name: profile.organization?.name,
@@ -112,7 +112,7 @@ export async function GET(request: NextRequest) {
       user: {
         id: user.id,
         email: user.email,
-        name: profile.name,
+        name: profile.full_name || profile.username || user.email,
         role: profile.role,
         organization_id: profile.organization_id,
         organization_name: profile.organization?.name,

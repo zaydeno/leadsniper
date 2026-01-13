@@ -123,7 +123,7 @@ export async function POST(request: NextRequest) {
       listing_url: listing_url || null,
       source: 'kijiji',
       initiated_by: user.id,
-      initiated_by_name: profile.name || user.email,
+      initiated_by_name: profile.full_name || profile.username || user.email,
       initiated_at: new Date().toISOString(),
     };
 
@@ -164,7 +164,7 @@ export async function POST(request: NextRequest) {
     // Insert message with metadata
     const messageMetadata = {
       sent_by: user.email,
-      sent_by_name: profile.name || user.email,
+      sent_by_name: profile.full_name || profile.username || user.email,
       sent_at: new Date().toISOString(),
       source: 'extension',
       seller_name: seller_name || null,
