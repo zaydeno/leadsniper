@@ -76,10 +76,11 @@ function parseSpintax(template: string): string {
 function replacePlaceholders(
   message: string, 
   lead: CSVLead, 
-  vehicleMode: 'make' | 'model'
+  vehicleMode: 'make' | 'model',
+  useCustomerName: boolean = true
 ): string {
   let result = message;
-  result = result.replace(/\[Customer Name\]/gi, lead.name || 'there');
+  result = result.replace(/\[Customer Name\]/gi, useCustomerName ? (lead.name || 'there') : 'there');
   result = result.replace(/\[Make\]/gi, lead.make || '');
   result = result.replace(/\[Model\]/gi, lead.model || '');
   return result;
@@ -103,6 +104,7 @@ export function CampaignsManager({ initialCampaigns, organizations, users }: Cam
     assignment_mode: 'single_user' as 'single_user' | 'random_distribution',
     assigned_to: '',
     delay_seconds: 65,
+    use_customer_name: true,
   });
 
   // Update template when vehicle reference mode changes
@@ -125,10 +127,10 @@ export function CampaignsManager({ initialCampaigns, organizations, users }: Cam
     if (csvLeads.length > 0 && newCampaign.message_template) {
       const sampleLead = csvLeads[0];
       const parsed = parseSpintax(newCampaign.message_template);
-      const preview = replacePlaceholders(parsed, sampleLead, newCampaign.vehicle_reference_mode);
+      const preview = replacePlaceholders(parsed, sampleLead, newCampaign.vehicle_reference_mode, newCampaign.use_customer_name);
       setPreviewMessage(preview);
     }
-  }, [newCampaign.message_template, newCampaign.vehicle_reference_mode, csvLeads]);
+  }, [newCampaign.message_template, newCampaign.vehicle_reference_mode, newCampaign.use_customer_name, csvLeads]);
 
   // Parse CSV file
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -288,6 +290,7 @@ export function CampaignsManager({ initialCampaigns, organizations, users }: Cam
       assignment_mode: 'single_user',
       assigned_to: '',
       delay_seconds: 65,
+      use_customer_name: true,
     });
     setCsvLeads([]);
     setCsvFileName(null);
@@ -520,6 +523,40 @@ export function CampaignsManager({ initialCampaigns, organizations, users }: Cam
                       <p className="text-xs text-gray-500">e.g. "Dodge"</p>
                     </button>
                   </div>
+                </div>
+
+                {/* Customer Name Toggle */}
+                <div className="space-y-2">
+                  <Label className="text-gray-400">Use Customer Name</Label>
+                  <button
+                    type="button"
+                    onClick={() => setNewCampaign({ ...newCampaign, use_customer_name: !newCampaign.use_customer_name })}
+                    className={`w-full p-3 rounded-xl border transition-all flex items-center justify-between ${
+                      newCampaign.use_customer_name
+                        ? 'border-emerald-500 bg-emerald-500/10'
+                        : 'border-gray-800 hover:border-gray-700'
+                    }`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className={`w-10 h-6 rounded-full transition-all relative ${
+                        newCampaign.use_customer_name ? 'bg-emerald-500' : 'bg-gray-700'
+                      }`}>
+                        <div className={`w-4 h-4 rounded-full bg-white absolute top-1 transition-all ${
+                          newCampaign.use_customer_name ? 'right-1' : 'left-1'
+                        }`} />
+                      </div>
+                      <div className="text-left">
+                        <p className="text-sm text-white">
+                          {newCampaign.use_customer_name ? 'Personalized' : 'Generic'}
+                        </p>
+                        <p className="text-xs text-gray-500">
+                          {newCampaign.use_customer_name 
+                            ? 'e.g. "Hey Brett,"' 
+                            : 'e.g. "Hey there,"'}
+                        </p>
+                      </div>
+                    </div>
+                  </button>
                 </div>
 
                 {/* Message Template */}

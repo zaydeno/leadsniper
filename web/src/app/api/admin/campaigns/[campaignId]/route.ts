@@ -16,10 +16,11 @@ function parseSpintax(template: string): string {
 function replacePlaceholders(
   message: string,
   lead: { name?: string; make?: string; model?: string },
-  vehicleMode: 'make' | 'model'
+  vehicleMode: 'make' | 'model',
+  useCustomerName: boolean = true
 ): string {
   let result = message;
-  result = result.replace(/\[Customer Name\]/gi, lead.name || 'there');
+  result = result.replace(/\[Customer Name\]/gi, useCustomerName ? (lead.name || 'there') : 'there');
   result = result.replace(/\[Make\]/gi, lead.make || '');
   result = result.replace(/\[Model\]/gi, lead.model || '');
   return result;
@@ -299,7 +300,8 @@ async function resumeCampaign(campaignId: string) {
       const finalMessage = replacePlaceholders(
         parsedMessage,
         { name: lead.name, make: lead.make, model: lead.model },
-        campaign.vehicle_reference_mode
+        campaign.vehicle_reference_mode,
+        campaign.use_customer_name
       );
 
       // Send SMS

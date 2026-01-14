@@ -210,6 +210,7 @@ export interface Campaign {
   assigned_to: string | null;
   message_template: string;
   vehicle_reference_mode: VehicleReferenceMode;
+  use_customer_name: boolean;
   total_leads: number;
   sent_count: number;
   failed_count: number;
