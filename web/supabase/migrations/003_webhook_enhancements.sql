@@ -80,3 +80,4 @@ CREATE POLICY "Org admins can manage their signing keys" ON webhook_signing_keys
 ALTER TABLE organizations
 ADD COLUMN IF NOT EXISTS httpsms_webhook_signing_key TEXT;
 
+
