@@ -125,7 +125,7 @@ export function ChatWindow({
 
   // Extract metadata
   const metadata = thread.metadata || {};
-  const hasMetadata = metadata.seller_name || metadata.vehicle_model || metadata.listing_url || metadata.initiated_by_name;
+  const hasMetadata = metadata.seller_name || metadata.vehicle_model || metadata.vehicle_make || metadata.listing_url || metadata.initiated_by_name || metadata.campaign_name;
 
   // Auto-scroll to bottom on new messages
   useEffect(() => {
@@ -319,7 +319,14 @@ export function ChatWindow({
         {/* Lead Details Panel */}
         {showDetails && hasMetadata && (
           <div className="mt-4 p-4 bg-[#0a0a0f] rounded-xl border border-gray-800/50 space-y-3 animate-in slide-in-from-top-2 duration-200">
-            <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Lead Details</h3>
+            <div className="flex items-center justify-between">
+              <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Lead Details</h3>
+              {metadata.campaign_name && (
+                <span className="text-xs bg-purple-500/10 text-purple-400 px-2 py-0.5 rounded-full">
+                  Campaign: {metadata.campaign_name}
+                </span>
+              )}
+            </div>
             
             <div className="grid grid-cols-2 gap-4">
               {metadata.seller_name && (
@@ -332,12 +339,17 @@ export function ChatWindow({
                 </div>
               )}
 
-              {metadata.vehicle_model && (
+              {(metadata.vehicle_model || metadata.vehicle_make) && (
                 <div className="flex items-start gap-2">
                   <Car className="w-4 h-4 text-emerald-400 mt-0.5 shrink-0" />
                   <div>
                     <p className="text-xs text-gray-500">Vehicle</p>
-                    <p className="text-sm text-white">{metadata.vehicle_model}</p>
+                    <p className="text-sm text-white">
+                      {metadata.vehicle_model || metadata.vehicle_make}
+                      {metadata.vehicle_model && metadata.vehicle_make && metadata.vehicle_model !== metadata.vehicle_make && (
+                        <span className="text-gray-500 ml-1">({metadata.vehicle_make})</span>
+                      )}
+                    </p>
                   </div>
                 </div>
               )}

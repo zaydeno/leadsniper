@@ -15,6 +15,7 @@ import {
   Shield,
   ChevronRight,
   LayoutDashboard,
+  Megaphone,
 } from 'lucide-react';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import {
@@ -34,6 +35,7 @@ const navigation = [
   { name: 'Overview', href: '/admin', icon: LayoutDashboard },
   { name: 'Organizations', href: '/admin/organizations', icon: Building2 },
   { name: 'Users', href: '/admin/users', icon: Users },
+  { name: 'Campaigns', href: '/admin/campaigns', icon: Megaphone },
   { name: 'All Messages', href: '/admin/messages', icon: MessageSquare },
   { name: 'Settings', href: '/admin/settings', icon: Settings },
 ];
@@ -145,4 +147,5 @@ export function AdminSidebar({ user, profile }: AdminSidebarProps) {
     </aside>
   );
 }
+
 

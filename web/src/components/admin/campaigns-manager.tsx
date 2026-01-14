@@ -1,0 +1,726 @@
+'use client';
+
+import { useState, useRef, useEffect } from 'react';
+import { createClient } from '@/lib/supabase/client';
+import { Organization, Campaign, Profile } from '@/lib/types';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from '@/components/ui/dialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { 
+  Megaphone, 
+  Plus, 
+  Upload, 
+  FileText, 
+  Play, 
+  Pause, 
+  StopCircle,
+  Users,
+  Shuffle,
+  Car,
+  ChevronDown,
+  Loader2,
+  CheckCircle2,
+  XCircle,
+  Clock,
+  Trash2,
+  Eye
+} from 'lucide-react';
+import { toast } from 'sonner';
+import { format } from 'date-fns';
+
+interface CampaignsManagerProps {
+  initialCampaigns: Campaign[];
+  organizations: Organization[];
+  users: Profile[];
+}
+
+interface CSVLead {
+  phone_number: string;
+  name: string;
+  make: string;
+  model: string;
+  kijiji_link: string;
+}
+
+// Default spintax message template
+const DEFAULT_MESSAGE_TEMPLATE = `{Hi|Hey|Hello} {NAME}, {I saw|I noticed|I came across} your {VEHICLE} {listing|ad|post} on Kijiji. {I'm very interested|I'd love to learn more|This looks great}! {Is it still available?|Can we chat about it?|Would you be open to selling?}`;
+
+// Function to parse spintax and return a random variation
+function parseSpintax(template: string): string {
+  const spintaxRegex = /\{([^{}]+)\}/g;
+  return template.replace(spintaxRegex, (match, group) => {
+    const options = group.split('|');
+    return options[Math.floor(Math.random() * options.length)];
+  });
+}
+
+// Function to replace placeholders with actual values
+function replacePlaceholders(
+  message: string, 
+  lead: CSVLead, 
+  vehicleMode: 'make' | 'model'
+): string {
+  let result = message;
+  result = result.replace(/\{NAME\}/gi, lead.name || 'there');
+  result = result.replace(/\{VEHICLE\}/gi, vehicleMode === 'model' ? (lead.model || lead.make || 'vehicle') : (lead.make || lead.model || 'vehicle'));
+  result = result.replace(/\{MAKE\}/gi, lead.make || '');
+  result = result.replace(/\{MODEL\}/gi, lead.model || '');
+  return result;
+}
+
+export function CampaignsManager({ initialCampaigns, organizations, users }: CampaignsManagerProps) {
+  const [campaigns, setCampaigns] = useState<Campaign[]>(initialCampaigns);
+  const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [isCreating, setIsCreating] = useState(false);
+  const [csvLeads, setCsvLeads] = useState<CSVLead[]>([]);
+  const [csvFileName, setCsvFileName] = useState<string | null>(null);
+  const [previewMessage, setPreviewMessage] = useState<string>('');
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  
+  // New campaign form state
+  const [newCampaign, setNewCampaign] = useState({
+    name: '',
+    organization_id: '',
+    message_template: DEFAULT_MESSAGE_TEMPLATE,
+    vehicle_reference_mode: 'model' as 'make' | 'model',
+    assignment_mode: 'single_user' as 'single_user' | 'random_distribution',
+    assigned_to: '',
+    delay_seconds: 65,
+  });
+
+  const supabase = createClient();
+
+  // Get users for selected organization
+  const orgUsers = users.filter(u => u.organization_id === newCampaign.organization_id);
+
+  // Update preview when template or leads change
+  useEffect(() => {
+    if (csvLeads.length > 0 && newCampaign.message_template) {
+      const sampleLead = csvLeads[0];
+      const parsed = parseSpintax(newCampaign.message_template);
+      const preview = replacePlaceholders(parsed, sampleLead, newCampaign.vehicle_reference_mode);
+      setPreviewMessage(preview);
+    }
+  }, [newCampaign.message_template, newCampaign.vehicle_reference_mode, csvLeads]);
+
+  // Parse CSV file
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setCsvFileName(file.name);
+    const reader = new FileReader();
+    
+    reader.onload = (event) => {
+      const text = event.target?.result as string;
+      const lines = text.split('\n').filter(line => line.trim());
+      
+      if (lines.length < 2) {
+        toast.error('CSV file must have headers and at least one data row');
+        return;
+      }
+
+      // Parse headers (case-insensitive mapping)
+      const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
+      
+      // Map headers to expected fields
+      const headerMap: Record<string, number> = {};
+      headers.forEach((h, i) => {
+        if (h.includes('phone')) headerMap.phone_number = i;
+        else if (h === 'name') headerMap.name = i;
+        else if (h === 'make') headerMap.make = i;
+        else if (h === 'model') headerMap.model = i;
+        else if (h.includes('kijiji') || h.includes('link')) headerMap.kijiji_link = i;
+      });
+
+      if (headerMap.phone_number === undefined) {
+        toast.error('CSV must have a phone number column');
+        return;
+      }
+
+      // Parse data rows
+      const leads: CSVLead[] = [];
+      for (let i = 1; i < lines.length; i++) {
+        const values = lines[i].split(',').map(v => v.trim());
+        if (values[headerMap.phone_number]) {
+          leads.push({
+            phone_number: values[headerMap.phone_number] || '',
+            name: headerMap.name !== undefined ? values[headerMap.name] || '' : '',
+            make: headerMap.make !== undefined ? values[headerMap.make] || '' : '',
+            model: headerMap.model !== undefined ? values[headerMap.model] || '' : '',
+            kijiji_link: headerMap.kijiji_link !== undefined ? values[headerMap.kijiji_link] || '' : '',
+          });
+        }
+      }
+
+      setCsvLeads(leads);
+      toast.success(`Loaded ${leads.length} leads from CSV`);
+    };
+
+    reader.readAsText(file);
+  };
+
+  // Create campaign
+  const handleCreateCampaign = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    if (csvLeads.length === 0) {
+      toast.error('Please upload a CSV file with leads');
+      return;
+    }
+
+    if (!newCampaign.organization_id) {
+      toast.error('Please select an organization');
+      return;
+    }
+
+    if (newCampaign.assignment_mode === 'single_user' && !newCampaign.assigned_to) {
+      toast.error('Please select a user to assign leads to');
+      return;
+    }
+
+    setIsCreating(true);
+
+    try {
+      // Create campaign via API
+      const response = await fetch('/api/admin/campaigns', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...newCampaign,
+          leads: csvLeads,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to create campaign');
+      }
+
+      setCampaigns([data.campaign, ...campaigns]);
+      setIsDialogOpen(false);
+      resetForm();
+      toast.success('Campaign created! It will start sending messages shortly.');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to create campaign');
+    } finally {
+      setIsCreating(false);
+    }
+  };
+
+  // Start/Pause/Cancel campaign
+  const handleCampaignAction = async (campaignId: string, action: 'start' | 'pause' | 'cancel') => {
+    try {
+      const response = await fetch(`/api/admin/campaigns/${campaignId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || `Failed to ${action} campaign`);
+      }
+
+      setCampaigns(campaigns.map(c => c.id === campaignId ? data.campaign : c));
+      toast.success(`Campaign ${action === 'start' ? 'started' : action === 'pause' ? 'paused' : 'cancelled'}`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : `Failed to ${action} campaign`);
+    }
+  };
+
+  // Delete campaign
+  const handleDeleteCampaign = async (campaignId: string) => {
+    if (!confirm('Are you sure you want to delete this campaign?')) return;
+
+    try {
+      const response = await fetch(`/api/admin/campaigns/${campaignId}`, {
+        method: 'DELETE',
+      });
+
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.error || 'Failed to delete campaign');
+      }
+
+      setCampaigns(campaigns.filter(c => c.id !== campaignId));
+      toast.success('Campaign deleted');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to delete campaign');
+    }
+  };
+
+  const resetForm = () => {
+    setNewCampaign({
+      name: '',
+      organization_id: '',
+      message_template: DEFAULT_MESSAGE_TEMPLATE,
+      vehicle_reference_mode: 'model',
+      assignment_mode: 'single_user',
+      assigned_to: '',
+      delay_seconds: 65,
+    });
+    setCsvLeads([]);
+    setCsvFileName(null);
+    setPreviewMessage('');
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  const getStatusBadge = (status: string) => {
+    switch (status) {
+      case 'draft':
+        return <Badge className="bg-gray-500/10 text-gray-400 border-gray-500/20">Draft</Badge>;
+      case 'running':
+        return <Badge className="bg-emerald-500/10 text-emerald-400 border-emerald-500/20 animate-pulse">Running</Badge>;
+      case 'paused':
+        return <Badge className="bg-amber-500/10 text-amber-400 border-amber-500/20">Paused</Badge>;
+      case 'completed':
+        return <Badge className="bg-blue-500/10 text-blue-400 border-blue-500/20">Completed</Badge>;
+      case 'cancelled':
+        return <Badge className="bg-red-500/10 text-red-400 border-red-500/20">Cancelled</Badge>;
+      default:
+        return <Badge>{status}</Badge>;
+    }
+  };
+
+  return (
+    <div className="h-screen overflow-auto p-8">
+      <div className="max-w-6xl mx-auto">
+        <div className="flex items-center justify-between mb-8">
+          <div>
+            <h1 className="text-2xl font-bold text-white">Campaigns</h1>
+            <p className="text-gray-500 mt-1">Create and manage mass text campaigns</p>
+          </div>
+
+          <Dialog open={isDialogOpen} onOpenChange={(open) => {
+            setIsDialogOpen(open);
+            if (!open) resetForm();
+          }}>
+            <DialogTrigger asChild>
+              <Button className="bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600">
+                <Plus className="w-4 h-4 mr-2" />
+                New Campaign
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="bg-[#12121a] border-gray-800 text-white max-w-2xl max-h-[90vh] overflow-y-auto">
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2">
+                  <Megaphone className="w-5 h-5 text-purple-400" />
+                  Create Campaign
+                </DialogTitle>
+                <DialogDescription className="text-gray-500">
+                  Upload a CSV and configure your mass text campaign
+                </DialogDescription>
+              </DialogHeader>
+              
+              <form onSubmit={handleCreateCampaign} className="space-y-6 mt-4">
+                {/* Campaign Name */}
+                <div className="space-y-2">
+                  <Label className="text-gray-400">Campaign Name</Label>
+                  <Input
+                    value={newCampaign.name}
+                    onChange={(e) => setNewCampaign({ ...newCampaign, name: e.target.value })}
+                    placeholder="January Outreach"
+                    className="bg-[#1a1a24] border-gray-800 text-white"
+                    required
+                  />
+                </div>
+
+                {/* Organization Selection */}
+                <div className="space-y-2">
+                  <Label className="text-gray-400">Organization</Label>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button 
+                        type="button"
+                        variant="outline" 
+                        className="w-full justify-between bg-[#1a1a24] border-gray-800 text-white hover:bg-[#252532]"
+                      >
+                        {newCampaign.organization_id 
+                          ? organizations.find(o => o.id === newCampaign.organization_id)?.name 
+                          : 'Select organization'}
+                        <ChevronDown className="w-4 h-4 ml-2" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent className="bg-[#1a1a24] border-gray-800 w-full">
+                      {organizations.map((org) => (
+                        <DropdownMenuItem
+                          key={org.id}
+                          onClick={() => setNewCampaign({ ...newCampaign, organization_id: org.id, assigned_to: '' })}
+                          className="cursor-pointer hover:bg-purple-500/10"
+                        >
+                          {org.name}
+                        </DropdownMenuItem>
+                      ))}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
+
+                {/* CSV Upload */}
+                <div className="space-y-2">
+                  <Label className="text-gray-400">Upload Leads CSV</Label>
+                  <div 
+                    className="border-2 border-dashed border-gray-700 rounded-xl p-6 text-center hover:border-purple-500/50 transition-colors cursor-pointer"
+                    onClick={() => fileInputRef.current?.click()}
+                  >
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept=".csv"
+                      onChange={handleFileUpload}
+                      className="hidden"
+                    />
+                    {csvFileName ? (
+                      <div className="flex items-center justify-center gap-2">
+                        <FileText className="w-5 h-5 text-emerald-400" />
+                        <span className="text-emerald-400">{csvFileName}</span>
+                        <Badge className="bg-emerald-500/10 text-emerald-400">
+                          {csvLeads.length} leads
+                        </Badge>
+                      </div>
+                    ) : (
+                      <>
+                        <Upload className="w-8 h-8 text-gray-500 mx-auto mb-2" />
+                        <p className="text-sm text-gray-500">Click to upload CSV file</p>
+                        <p className="text-xs text-gray-600 mt-1">Headers: Phone number, Name, Make, Model, Kijiji Link</p>
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                {/* Assignment Mode */}
+                <div className="space-y-2">
+                  <Label className="text-gray-400">Lead Assignment</Label>
+                  <div className="grid grid-cols-2 gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setNewCampaign({ ...newCampaign, assignment_mode: 'single_user' })}
+                      className={`p-3 rounded-xl border transition-all ${
+                        newCampaign.assignment_mode === 'single_user'
+                          ? 'border-purple-500 bg-purple-500/10'
+                          : 'border-gray-800 hover:border-gray-700'
+                      }`}
+                    >
+                      <Users className="w-5 h-5 mx-auto mb-1 text-purple-400" />
+                      <p className="text-sm text-white">Single User</p>
+                      <p className="text-xs text-gray-500">Assign all to one person</p>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setNewCampaign({ ...newCampaign, assignment_mode: 'random_distribution' })}
+                      className={`p-3 rounded-xl border transition-all ${
+                        newCampaign.assignment_mode === 'random_distribution'
+                          ? 'border-purple-500 bg-purple-500/10'
+                          : 'border-gray-800 hover:border-gray-700'
+                      }`}
+                    >
+                      <Shuffle className="w-5 h-5 mx-auto mb-1 text-purple-400" />
+                      <p className="text-sm text-white">Random Distribution</p>
+                      <p className="text-xs text-gray-500">Distribute fairly among team</p>
+                    </button>
+                  </div>
+                </div>
+
+                {/* User Selection (for single user mode) */}
+                {newCampaign.assignment_mode === 'single_user' && newCampaign.organization_id && (
+                  <div className="space-y-2">
+                    <Label className="text-gray-400">Assign To</Label>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button 
+                          type="button"
+                          variant="outline" 
+                          className="w-full justify-between bg-[#1a1a24] border-gray-800 text-white hover:bg-[#252532]"
+                        >
+                          {newCampaign.assigned_to 
+                            ? orgUsers.find(u => u.id === newCampaign.assigned_to)?.full_name || orgUsers.find(u => u.id === newCampaign.assigned_to)?.email
+                            : 'Select user'}
+                          <ChevronDown className="w-4 h-4 ml-2" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent className="bg-[#1a1a24] border-gray-800">
+                        {orgUsers.length === 0 ? (
+                          <div className="p-2 text-sm text-gray-500">No users in this organization</div>
+                        ) : (
+                          orgUsers.map((user) => (
+                            <DropdownMenuItem
+                              key={user.id}
+                              onClick={() => setNewCampaign({ ...newCampaign, assigned_to: user.id })}
+                              className="cursor-pointer hover:bg-purple-500/10"
+                            >
+                              <div>
+                                <p className="text-white">{user.full_name || user.email}</p>
+                                <p className="text-xs text-gray-500 capitalize">{user.role}</p>
+                              </div>
+                            </DropdownMenuItem>
+                          ))
+                        )}
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </div>
+                )}
+
+                {/* Vehicle Reference Mode */}
+                <div className="space-y-2">
+                  <Label className="text-gray-400">Vehicle Reference in Message</Label>
+                  <div className="grid grid-cols-2 gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setNewCampaign({ ...newCampaign, vehicle_reference_mode: 'model' })}
+                      className={`p-3 rounded-xl border transition-all ${
+                        newCampaign.vehicle_reference_mode === 'model'
+                          ? 'border-purple-500 bg-purple-500/10'
+                          : 'border-gray-800 hover:border-gray-700'
+                      }`}
+                    >
+                      <Car className="w-5 h-5 mx-auto mb-1 text-purple-400" />
+                      <p className="text-sm text-white">Use Model</p>
+                      <p className="text-xs text-gray-500">e.g. "2023 Dodge Charger"</p>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setNewCampaign({ ...newCampaign, vehicle_reference_mode: 'make' })}
+                      className={`p-3 rounded-xl border transition-all ${
+                        newCampaign.vehicle_reference_mode === 'make'
+                          ? 'border-purple-500 bg-purple-500/10'
+                          : 'border-gray-800 hover:border-gray-700'
+                      }`}
+                    >
+                      <Car className="w-5 h-5 mx-auto mb-1 text-purple-400" />
+                      <p className="text-sm text-white">Use Make</p>
+                      <p className="text-xs text-gray-500">e.g. "Dodge"</p>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Message Template */}
+                <div className="space-y-2">
+                  <Label className="text-gray-400">Message Template (Spintax)</Label>
+                  <textarea
+                    value={newCampaign.message_template}
+                    onChange={(e) => setNewCampaign({ ...newCampaign, message_template: e.target.value })}
+                    placeholder="Enter your message with spintax..."
+                    className="w-full h-32 px-4 py-3 bg-[#1a1a24] border border-gray-800 rounded-xl text-white placeholder:text-gray-600 resize-none focus:outline-none focus:border-purple-500/50"
+                    required
+                  />
+                  <div className="text-xs text-gray-500 space-y-1">
+                    <p><strong>Placeholders:</strong> {'{NAME}'}, {'{VEHICLE}'}, {'{MAKE}'}, {'{MODEL}'}</p>
+                    <p><strong>Spintax:</strong> Use {'{option1|option2|option3}'} for random variations</p>
+                  </div>
+                </div>
+
+                {/* Preview */}
+                {previewMessage && (
+                  <div className="space-y-2">
+                    <Label className="text-gray-400">Message Preview</Label>
+                    <div className="p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-xl">
+                      <p className="text-sm text-white">{previewMessage}</p>
+                    </div>
+                  </div>
+                )}
+
+                {/* Delay Setting */}
+                <div className="space-y-2">
+                  <Label className="text-gray-400">Delay Between Messages (seconds)</Label>
+                  <Input
+                    type="number"
+                    min="60"
+                    max="120"
+                    value={newCampaign.delay_seconds}
+                    onChange={(e) => setNewCampaign({ ...newCampaign, delay_seconds: parseInt(e.target.value) || 65 })}
+                    className="bg-[#1a1a24] border-gray-800 text-white"
+                  />
+                  <p className="text-xs text-gray-500">Recommended: 60-70 seconds to avoid spam filters</p>
+                </div>
+
+                {/* Submit */}
+                <div className="flex justify-end gap-3 pt-4">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    onClick={() => setIsDialogOpen(false)}
+                    className="text-gray-400"
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    type="submit"
+                    disabled={isCreating || csvLeads.length === 0}
+                    className="bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600"
+                  >
+                    {isCreating ? (
+                      <>
+                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                        Creating...
+                      </>
+                    ) : (
+                      <>
+                        <Megaphone className="w-4 h-4 mr-2" />
+                        Create & Start Campaign
+                      </>
+                    )}
+                  </Button>
+                </div>
+              </form>
+            </DialogContent>
+          </Dialog>
+        </div>
+
+        {/* Campaigns List */}
+        <div className="space-y-4">
+          {campaigns.length === 0 ? (
+            <Card className="bg-[#12121a] border-gray-800">
+              <CardContent className="py-12 text-center">
+                <Megaphone className="w-12 h-12 text-gray-600 mx-auto mb-4" />
+                <h3 className="text-lg font-medium text-gray-400">No campaigns yet</h3>
+                <p className="text-sm text-gray-600 mt-1">Create your first mass text campaign</p>
+              </CardContent>
+            </Card>
+          ) : (
+            campaigns.map((campaign) => (
+              <Card key={campaign.id} className="bg-[#12121a] border-gray-800">
+                <CardHeader className="flex flex-row items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${
+                      campaign.status === 'running' 
+                        ? 'bg-gradient-to-br from-purple-500 to-pink-500' 
+                        : 'bg-purple-500/10'
+                    }`}>
+                      <Megaphone className={`w-5 h-5 ${campaign.status === 'running' ? 'text-white' : 'text-purple-400'}`} />
+                    </div>
+                    <div>
+                      <CardTitle className="text-white">{campaign.name}</CardTitle>
+                      <p className="text-xs text-gray-500">
+                        {organizations.find(o => o.id === campaign.organization_id)?.name}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {getStatusBadge(campaign.status)}
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  {/* Progress Bar */}
+                  <div className="mb-4">
+                    <div className="flex justify-between text-sm mb-1">
+                      <span className="text-gray-400">Progress</span>
+                      <span className="text-white">{campaign.sent_count} / {campaign.total_leads}</span>
+                    </div>
+                    <div className="h-2 bg-gray-800 rounded-full overflow-hidden">
+                      <div 
+                        className="h-full bg-gradient-to-r from-purple-500 to-pink-500 transition-all duration-500"
+                        style={{ width: `${campaign.total_leads > 0 ? (campaign.sent_count / campaign.total_leads) * 100 : 0}%` }}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Stats */}
+                  <div className="grid grid-cols-4 gap-4 mb-4">
+                    <div className="text-center p-2 bg-[#0a0a0f] rounded-lg">
+                      <p className="text-lg font-bold text-white">{campaign.total_leads}</p>
+                      <p className="text-xs text-gray-500">Total</p>
+                    </div>
+                    <div className="text-center p-2 bg-[#0a0a0f] rounded-lg">
+                      <p className="text-lg font-bold text-emerald-400">{campaign.sent_count}</p>
+                      <p className="text-xs text-gray-500">Sent</p>
+                    </div>
+                    <div className="text-center p-2 bg-[#0a0a0f] rounded-lg">
+                      <p className="text-lg font-bold text-red-400">{campaign.failed_count}</p>
+                      <p className="text-xs text-gray-500">Failed</p>
+                    </div>
+                    <div className="text-center p-2 bg-[#0a0a0f] rounded-lg">
+                      <p className="text-lg font-bold text-gray-400">{campaign.total_leads - campaign.sent_count - campaign.failed_count}</p>
+                      <p className="text-xs text-gray-500">Pending</p>
+                    </div>
+                  </div>
+
+                  {/* Actions */}
+                  <div className="flex items-center justify-between">
+                    <div className="text-sm text-gray-500">
+                      Created {format(new Date(campaign.created_at), 'MMM d, yyyy h:mm a')}
+                      {campaign.started_at && (
+                        <span className="ml-2">• Started {format(new Date(campaign.started_at), 'h:mm a')}</span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {campaign.status === 'draft' && (
+                        <Button
+                          size="sm"
+                          onClick={() => handleCampaignAction(campaign.id, 'start')}
+                          className="bg-emerald-500 hover:bg-emerald-600"
+                        >
+                          <Play className="w-4 h-4 mr-1" />
+                          Start
+                        </Button>
+                      )}
+                      {campaign.status === 'running' && (
+                        <Button
+                          size="sm"
+                          onClick={() => handleCampaignAction(campaign.id, 'pause')}
+                          className="bg-amber-500 hover:bg-amber-600"
+                        >
+                          <Pause className="w-4 h-4 mr-1" />
+                          Pause
+                        </Button>
+                      )}
+                      {campaign.status === 'paused' && (
+                        <>
+                          <Button
+                            size="sm"
+                            onClick={() => handleCampaignAction(campaign.id, 'start')}
+                            className="bg-emerald-500 hover:bg-emerald-600"
+                          >
+                            <Play className="w-4 h-4 mr-1" />
+                            Resume
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => handleCampaignAction(campaign.id, 'cancel')}
+                            className="border-red-500/30 text-red-400 hover:bg-red-500/10"
+                          >
+                            <StopCircle className="w-4 h-4 mr-1" />
+                            Cancel
+                          </Button>
+                        </>
+                      )}
+                      {(campaign.status === 'completed' || campaign.status === 'cancelled') && (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => handleDeleteCampaign(campaign.id)}
+                          className="text-red-400 hover:bg-red-500/10"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            ))
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+

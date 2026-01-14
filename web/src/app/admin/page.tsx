@@ -1,17 +1,18 @@
 import { createAdminClient } from '@/lib/supabase/admin';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Building2, Users, MessageSquare, Phone } from 'lucide-react';
+import { Building2, Users, MessageSquare, Phone, Megaphone } from 'lucide-react';
 
 export default async function AdminDashboard() {
   // Use admin client to bypass RLS
   const adminClient = createAdminClient();
 
   // Fetch stats
-  const [orgsResult, usersResult, messagesResult, callsResult] = await Promise.all([
+  const [orgsResult, usersResult, messagesResult, callsResult, campaignsResult] = await Promise.all([
     adminClient.from('organizations').select('id', { count: 'exact' }),
     adminClient.from('profiles').select('id', { count: 'exact' }),
     adminClient.from('messages').select('id', { count: 'exact' }),
     adminClient.from('missed_calls').select('id', { count: 'exact' }).eq('acknowledged', false),
+    adminClient.from('campaigns').select('id', { count: 'exact' }).eq('status', 'running'),
   ]);
 
   const stats = [
@@ -34,10 +35,10 @@ export default async function AdminDashboard() {
       color: 'emerald',
     },
     {
-      name: 'Pending Calls',
-      value: callsResult.count || 0,
-      icon: Phone,
-      color: 'orange',
+      name: 'Active Campaigns',
+      value: campaignsResult.count || 0,
+      icon: Megaphone,
+      color: 'pink',
     },
   ];
 
@@ -46,6 +47,7 @@ export default async function AdminDashboard() {
     blue: 'from-blue-400 to-blue-600 shadow-blue-500/20 bg-blue-500/10 text-blue-400',
     emerald: 'from-emerald-400 to-emerald-600 shadow-emerald-500/20 bg-emerald-500/10 text-emerald-400',
     orange: 'from-orange-400 to-orange-600 shadow-orange-500/20 bg-orange-500/10 text-orange-400',
+    pink: 'from-pink-400 to-pink-600 shadow-pink-500/20 bg-pink-500/10 text-pink-400',
   };
 
   return (
@@ -83,7 +85,7 @@ export default async function AdminDashboard() {
           <CardHeader>
             <CardTitle className="text-white">Quick Actions</CardTitle>
           </CardHeader>
-          <CardContent className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <CardContent className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
             <a
               href="/admin/organizations"
               className="p-4 rounded-lg bg-purple-500/10 border border-purple-500/20 hover:bg-purple-500/20 transition-colors"
@@ -99,6 +101,14 @@ export default async function AdminDashboard() {
               <Users className="w-6 h-6 text-blue-400 mb-2" />
               <h3 className="font-medium text-white">Manage Users</h3>
               <p className="text-sm text-gray-500 mt-1">View and manage all users</p>
+            </a>
+            <a
+              href="/admin/campaigns"
+              className="p-4 rounded-lg bg-gradient-to-br from-pink-500/10 to-purple-500/10 border border-pink-500/20 hover:from-pink-500/20 hover:to-purple-500/20 transition-colors"
+            >
+              <Megaphone className="w-6 h-6 text-pink-400 mb-2" />
+              <h3 className="font-medium text-white">Mass Text Campaigns</h3>
+              <p className="text-sm text-gray-500 mt-1">Create and manage SMS campaigns</p>
             </a>
             <a
               href="/admin/messages"
