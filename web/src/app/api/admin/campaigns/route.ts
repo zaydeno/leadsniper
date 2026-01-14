@@ -191,16 +191,20 @@ export async function POST(request: NextRequest) {
     // Start processing in background (fire and forget)
     // Use setTimeout to ensure it runs in a separate event loop tick
     setTimeout(() => {
-      processCampaign(campaign.id).catch((error) => {
+      processCampaign(campaign.id).catch(async (error) => {
         console.error('Campaign processing error:', error);
         // Log the error to the campaign
-        const errorClient = createAdminClient();
-        errorClient.from('campaign_logs').insert({
-          campaign_id: campaign.id,
-          level: 'error',
-          message: `Campaign processing crashed: ${error instanceof Error ? error.message : 'Unknown error'}`,
-          details: { error: String(error) },
-        }).catch(console.error);
+        try {
+          const errorClient = createAdminClient();
+          await errorClient.from('campaign_logs').insert({
+            campaign_id: campaign.id,
+            level: 'error',
+            message: `Campaign processing crashed: ${error instanceof Error ? error.message : 'Unknown error'}`,
+            details: { error: String(error) },
+          });
+        } catch (logError) {
+          console.error('Failed to log campaign error:', logError);
+        }
       });
     }, 100);
 

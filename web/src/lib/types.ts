@@ -2,7 +2,7 @@
 
 export type UserRole = 'superadmin' | 'org_admin' | 'sales';
 export type MessageDirection = 'inbound' | 'outbound';
-export type MessageStatus = 'sent' | 'received' | 'failed' | 'pending' | 'delivered' | 'expired';
+export type MessageStatus = 'sent' | 'received' | 'failed' | 'pending';
 
 export interface Organization {
   id: string;
@@ -10,7 +10,6 @@ export interface Organization {
   slug: string;
   httpsms_api_key: string | null;
   httpsms_from_number: string | null;
-  httpsms_webhook_signing_key: string | null;
   max_sales_seats: number | null; // NULL = unlimited
   is_active: boolean;
   created_at: string;
@@ -103,47 +102,15 @@ export interface Thread {
 }
 
 export interface ThreadMetadata {
-  seller_name?: string;
   vehicle_model?: string;
-  vehicle_make?: string;
-  listing_url?: string;
   source?: string;
-  initiated_by?: string;
-  initiated_by_name?: string;
-  initiated_at?: string;
-  // Campaign fields
-  campaign_id?: string;
-  campaign_name?: string;
   [key: string]: unknown;
 }
 
-// Phone Status (for heartbeat tracking)
-export interface PhoneStatus {
-  id: string;
-  phone_number: string;
-  organization_id: string | null;
-  is_online: boolean;
-  last_heartbeat_at: string;
-  went_offline_at: string | null;
-  created_at: string;
-  updated_at: string;
-}
-
-// httpsms Webhook Event Types
-export type HttpSmsEventType =
-  | 'message.phone.received'
-  | 'message.phone.sent'
-  | 'message.phone.delivered'
-  | 'message.send.failed'
-  | 'message.send.expired'
-  | 'message.call.missed'
-  | 'phone.heartbeat.offline'
-  | 'phone.heartbeat.online';
-
-// httpsms Webhook Payloads (CloudEvents format)
+// httpsms Webhook Payloads
 export interface HttpSmsWebhookPayload {
-  type: HttpSmsEventType;
-  data: HttpSmsMessageData | HttpSmsCallData | HttpSmsHeartbeatData;
+  event_type: 'message.phone.received' | 'message.phone.sent' | 'call.missed';
+  data: HttpSmsMessageData | HttpSmsCallData;
 }
 
 export interface HttpSmsMessageData {
@@ -154,7 +121,6 @@ export interface HttpSmsMessageData {
   timestamp: string;
   sim: 'SIM1' | 'SIM2';
   encrypted: boolean;
-  failure_reason?: string;
 }
 
 export interface HttpSmsCallData {
@@ -163,11 +129,6 @@ export interface HttpSmsCallData {
   contact: string;
   timestamp: string;
   sim: 'SIM1' | 'SIM2';
-}
-
-export interface HttpSmsHeartbeatData {
-  owner: string;
-  timestamp: string;
 }
 
 // API Request/Response Types
@@ -194,58 +155,4 @@ export interface CreateOrganizationRequest {
   slug: string;
   httpsms_api_key?: string;
   httpsms_from_number?: string;
-}
-
-// Campaign Types
-export type CampaignStatus = 'draft' | 'running' | 'paused' | 'completed' | 'cancelled';
-export type CampaignAssignmentMode = 'single_user' | 'random_distribution';
-export type VehicleReferenceMode = 'make' | 'model';
-
-export interface Campaign {
-  id: string;
-  name: string;
-  organization_id: string;
-  status: CampaignStatus;
-  assignment_mode: CampaignAssignmentMode;
-  assigned_to: string | null;
-  message_template: string;
-  vehicle_reference_mode: VehicleReferenceMode;
-  use_customer_name: boolean;
-  total_leads: number;
-  sent_count: number;
-  failed_count: number;
-  current_lead_index: number;
-  delay_seconds: number;
-  started_at: string | null;
-  completed_at: string | null;
-  created_by: string | null;
-  created_at: string;
-  updated_at: string;
-  // Joined data
-  organization?: Organization;
-  creator?: Profile;
-}
-
-export interface CampaignLead {
-  id: string;
-  campaign_id: string;
-  phone_number: string;
-  name: string | null;
-  make: string | null;
-  model: string | null;
-  kijiji_link: string | null;
-  status: 'pending' | 'sent' | 'failed' | 'skipped';
-  error_message: string | null;
-  sent_at: string | null;
-  assigned_to: string | null;
-  lead_order: number;
-  created_at: string;
-}
-
-export interface CampaignCSVRow {
-  phone_number: string;
-  name?: string;
-  make?: string;
-  model?: string;
-  kijiji_link?: string;
 }

@@ -103,15 +103,19 @@ export async function PATCH(
       // Resume processing in background (fire and forget)
       // Use setTimeout to ensure it runs in a separate event loop tick
       setTimeout(() => {
-        resumeCampaign(campaignId).catch((error) => {
+        resumeCampaign(campaignId).catch(async (error) => {
           console.error('Campaign resume error:', error);
-          const errorClient = createAdminClient();
-          errorClient.from('campaign_logs').insert({
-            campaign_id: campaignId,
-            level: 'error',
-            message: `Campaign resume crashed: ${error instanceof Error ? error.message : 'Unknown error'}`,
-            details: { error: String(error) },
-          }).catch(console.error);
+          try {
+            const errorClient = createAdminClient();
+            await errorClient.from('campaign_logs').insert({
+              campaign_id: campaignId,
+              level: 'error',
+              message: `Campaign resume crashed: ${error instanceof Error ? error.message : 'Unknown error'}`,
+              details: { error: String(error) },
+            });
+          } catch (logError) {
+            console.error('Failed to log campaign error:', logError);
+          }
         });
       }, 100);
       
