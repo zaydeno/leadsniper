@@ -161,25 +161,45 @@ export async function POST(request: NextRequest) {
   }
 }
 
+// Helper to add campaign log
+async function addLog(
+  adminClient: ReturnType<typeof createAdminClient>,
+  campaignId: string,
+  level: 'info' | 'success' | 'warning' | 'error',
+  message: string,
+  details?: Record<string, unknown>
+) {
+  await adminClient.from('campaign_logs').insert({
+    campaign_id: campaignId,
+    level,
+    message,
+    details: details || null,
+  });
+}
+
 // Background campaign processor
 async function processCampaign(campaignId: string) {
   const adminClient = createAdminClient();
 
+  await addLog(adminClient, campaignId, 'info', 'Campaign processing started');
+
   // Get campaign details
-  const { data: campaign } = await adminClient
+  const { data: campaign, error: campaignError } = await adminClient
     .from('campaigns')
     .select('*, organization:organizations(*)')
     .eq('id', campaignId)
     .single();
 
-  if (!campaign || !campaign.organization) {
-    console.error('Campaign or organization not found');
+  if (campaignError || !campaign || !campaign.organization) {
+    await addLog(adminClient, campaignId, 'error', 'Campaign or organization not found', { error: campaignError?.message });
     return;
   }
 
+  await addLog(adminClient, campaignId, 'info', `Loaded campaign: ${campaign.name}`, { organization: campaign.organization.name });
+
   const org = campaign.organization;
   if (!org.httpsms_api_key || !org.httpsms_from_number) {
-    console.error('Organization SMS not configured');
+    await addLog(adminClient, campaignId, 'error', 'Organization SMS not configured - missing API key or phone number');
     await adminClient
       .from('campaigns')
       .update({ status: 'cancelled' })
@@ -187,15 +207,23 @@ async function processCampaign(campaignId: string) {
     return;
   }
 
+  await addLog(adminClient, campaignId, 'info', `SMS configured with number: ${org.httpsms_from_number}`);
+
   // Get pending leads
-  const { data: leads } = await adminClient
+  const { data: leads, error: leadsError } = await adminClient
     .from('campaign_leads')
     .select('*')
     .eq('campaign_id', campaignId)
     .eq('status', 'pending')
     .order('lead_order', { ascending: true });
 
+  if (leadsError) {
+    await addLog(adminClient, campaignId, 'error', 'Failed to fetch leads', { error: leadsError.message });
+    return;
+  }
+
   if (!leads || leads.length === 0) {
+    await addLog(adminClient, campaignId, 'success', 'No pending leads - campaign complete');
     await adminClient
       .from('campaigns')
       .update({ status: 'completed', completed_at: new Date().toISOString() })
@@ -203,11 +231,16 @@ async function processCampaign(campaignId: string) {
     return;
   }
 
+  await addLog(adminClient, campaignId, 'info', `Found ${leads.length} pending leads to process`);
+
   const fromNumber = org.httpsms_from_number.startsWith('+') 
     ? org.httpsms_from_number 
     : `+${org.httpsms_from_number}`;
 
-  for (const lead of leads) {
+  for (let i = 0; i < leads.length; i++) {
+    const lead = leads[i];
+    await addLog(adminClient, campaignId, 'info', `Processing lead ${i + 1}/${leads.length}: ${lead.name || lead.phone_number}`, { phone: lead.phone_number });
+
     // Check if campaign is still running
     const { data: currentCampaign } = await adminClient
       .from('campaigns')
@@ -216,7 +249,7 @@ async function processCampaign(campaignId: string) {
       .single();
 
     if (!currentCampaign || currentCampaign.status !== 'running') {
-      console.log('Campaign paused or cancelled, stopping processing');
+      await addLog(adminClient, campaignId, 'warning', 'Campaign paused or cancelled, stopping processing');
       break;
     }
 
@@ -229,6 +262,8 @@ async function processCampaign(campaignId: string) {
         campaign.vehicle_reference_mode,
         campaign.use_customer_name
       );
+
+      await addLog(adminClient, campaignId, 'info', `Sending SMS to ${lead.phone_number}`, { message_preview: finalMessage.substring(0, 100) + '...' });
 
       // Send SMS
       const httpsmsResponse = await fetch('https://api.httpsms.com/v1/messages/send', {
@@ -246,6 +281,8 @@ async function processCampaign(campaignId: string) {
       });
 
       const httpsmsData = await httpsmsResponse.json();
+      
+      await addLog(adminClient, campaignId, 'info', `httpSMS API response`, { status: httpsmsData.status, response_ok: httpsmsResponse.ok });
 
       if (httpsmsResponse.ok && httpsmsData.status === 'success') {
         // Create thread with metadata
@@ -311,6 +348,8 @@ async function processCampaign(campaignId: string) {
           },
         });
 
+        await addLog(adminClient, campaignId, 'success', `✓ SMS sent successfully to ${lead.name || lead.phone_number}`, { httpsms_id: httpsmsData.data?.id });
+
         // Update lead status
         await adminClient
           .from('campaign_leads')
@@ -337,12 +376,15 @@ async function processCampaign(campaignId: string) {
         }
 
       } else {
+        const errorMsg = httpsmsData.message || 'SMS send failed';
+        await addLog(adminClient, campaignId, 'error', `✗ Failed to send to ${lead.phone_number}: ${errorMsg}`, { response: httpsmsData });
+        
         // Mark as failed
         await adminClient
           .from('campaign_leads')
           .update({ 
             status: 'failed', 
-            error_message: httpsmsData.message || 'SMS send failed' 
+            error_message: errorMsg 
           })
           .eq('id', lead.id);
 
@@ -355,12 +397,14 @@ async function processCampaign(campaignId: string) {
       }
 
     } catch (error) {
-      console.error('Error processing lead:', error);
+      const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+      await addLog(adminClient, campaignId, 'error', `✗ Exception while processing lead: ${errorMsg}`, { phone: lead.phone_number });
+      
       await adminClient
         .from('campaign_leads')
         .update({ 
           status: 'failed', 
-          error_message: error instanceof Error ? error.message : 'Unknown error' 
+          error_message: errorMsg 
         })
         .eq('id', lead.id);
 
@@ -373,8 +417,11 @@ async function processCampaign(campaignId: string) {
     }
 
     // Delay before next message (60-70 seconds)
-    const delay = campaign.delay_seconds * 1000;
-    await new Promise(resolve => setTimeout(resolve, delay));
+    if (i < leads.length - 1) {
+      const delay = campaign.delay_seconds * 1000;
+      await addLog(adminClient, campaignId, 'info', `Waiting ${campaign.delay_seconds} seconds before next message...`);
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
   }
 
   // Check final status
@@ -386,6 +433,7 @@ async function processCampaign(campaignId: string) {
 
   if (finalCampaign && finalCampaign.status === 'running') {
     // All leads processed
+    await addLog(adminClient, campaignId, 'success', `🎉 Campaign completed! Sent: ${finalCampaign.sent_count}, Failed: ${finalCampaign.failed_count}`);
     await adminClient
       .from('campaigns')
       .update({ 

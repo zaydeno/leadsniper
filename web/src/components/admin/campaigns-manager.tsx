@@ -34,12 +34,17 @@ import {
   Shuffle,
   Car,
   ChevronDown,
+  ChevronUp,
   Loader2,
   CheckCircle2,
   XCircle,
   Clock,
   Trash2,
-  Eye
+  Eye,
+  Terminal,
+  AlertCircle,
+  Info,
+  CheckCircle
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
@@ -56,6 +61,15 @@ interface CSVLead {
   make: string;
   model: string;
   kijiji_link: string;
+}
+
+interface CampaignLog {
+  id: string;
+  campaign_id: string;
+  level: 'info' | 'success' | 'warning' | 'error';
+  message: string;
+  details: Record<string, unknown> | null;
+  created_at: string;
 }
 
 // Default spintax message templates
@@ -95,6 +109,12 @@ export function CampaignsManager({ initialCampaigns, organizations, users }: Cam
   const [previewMessage, setPreviewMessage] = useState<string>('');
   const fileInputRef = useRef<HTMLInputElement>(null);
   
+  // Log viewer state
+  const [expandedLogs, setExpandedLogs] = useState<string | null>(null);
+  const [campaignLogs, setCampaignLogs] = useState<Record<string, CampaignLog[]>>({});
+  const [isLoadingLogs, setIsLoadingLogs] = useState<string | null>(null);
+  const logsEndRef = useRef<HTMLDivElement>(null);
+  
   // New campaign form state
   const [newCampaign, setNewCampaign] = useState({
     name: '',
@@ -118,6 +138,77 @@ export function CampaignsManager({ initialCampaigns, organizations, users }: Cam
   };
 
   const supabase = createClient();
+
+  // Fetch logs for a campaign
+  const fetchLogs = async (campaignId: string, since?: string) => {
+    try {
+      const url = since 
+        ? `/api/admin/campaigns/${campaignId}/logs?since=${encodeURIComponent(since)}`
+        : `/api/admin/campaigns/${campaignId}/logs`;
+      
+      const response = await fetch(url);
+      if (response.ok) {
+        const data = await response.json();
+        return data.logs as CampaignLog[];
+      }
+    } catch (error) {
+      console.error('Failed to fetch logs:', error);
+    }
+    return [];
+  };
+
+  // Toggle log viewer
+  const toggleLogs = async (campaignId: string) => {
+    if (expandedLogs === campaignId) {
+      setExpandedLogs(null);
+      return;
+    }
+
+    setExpandedLogs(campaignId);
+    setIsLoadingLogs(campaignId);
+    
+    const logs = await fetchLogs(campaignId);
+    setCampaignLogs(prev => ({ ...prev, [campaignId]: logs }));
+    setIsLoadingLogs(null);
+  };
+
+  // Poll for new logs and campaign updates when a campaign is running
+  useEffect(() => {
+    if (!expandedLogs) return;
+
+    const campaign = campaigns.find(c => c.id === expandedLogs);
+    if (!campaign || campaign.status !== 'running') return;
+
+    const interval = setInterval(async () => {
+      // Fetch new logs
+      const existingLogs = campaignLogs[expandedLogs] || [];
+      const lastLog = existingLogs[existingLogs.length - 1];
+      const newLogs = await fetchLogs(expandedLogs, lastLog?.created_at);
+      
+      if (newLogs.length > 0) {
+        setCampaignLogs(prev => ({
+          ...prev,
+          [expandedLogs]: [...(prev[expandedLogs] || []), ...newLogs]
+        }));
+      }
+
+      // Also refresh campaign data
+      const response = await fetch(`/api/admin/campaigns/${expandedLogs}`);
+      if (response.ok) {
+        const data = await response.json();
+        setCampaigns(prev => prev.map(c => c.id === expandedLogs ? data.campaign : c));
+      }
+    }, 2000); // Poll every 2 seconds
+
+    return () => clearInterval(interval);
+  }, [expandedLogs, campaigns, campaignLogs]);
+
+  // Auto-scroll logs to bottom
+  useEffect(() => {
+    if (logsEndRef.current) {
+      logsEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [campaignLogs, expandedLogs]);
 
   // Get users for selected organization
   const orgUsers = users.filter(u => u.organization_id === newCampaign.organization_id);
@@ -709,6 +800,22 @@ export function CampaignsManager({ initialCampaigns, organizations, users }: Cam
                       )}
                     </div>
                     <div className="flex items-center gap-2">
+                      {/* Log Viewer Toggle */}
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => toggleLogs(campaign.id)}
+                        className="border-gray-700 text-gray-400 hover:bg-gray-800"
+                      >
+                        <Terminal className="w-4 h-4 mr-1" />
+                        Logs
+                        {expandedLogs === campaign.id ? (
+                          <ChevronUp className="w-4 h-4 ml-1" />
+                        ) : (
+                          <ChevronDown className="w-4 h-4 ml-1" />
+                        )}
+                      </Button>
+                      
                       {campaign.status === 'draft' && (
                         <Button
                           size="sm"
@@ -762,6 +869,56 @@ export function CampaignsManager({ initialCampaigns, organizations, users }: Cam
                       )}
                     </div>
                   </div>
+
+                  {/* Log Viewer */}
+                  {expandedLogs === campaign.id && (
+                    <div className="mt-4 bg-[#0a0a0f] rounded-xl border border-gray-800 overflow-hidden">
+                      <div className="px-4 py-2 bg-gray-900/50 border-b border-gray-800 flex items-center gap-2">
+                        <Terminal className="w-4 h-4 text-gray-500" />
+                        <span className="text-sm font-medium text-gray-400">Campaign Logs</span>
+                        {campaign.status === 'running' && (
+                          <span className="ml-auto flex items-center gap-1 text-xs text-emerald-400">
+                            <span className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse" />
+                            Live
+                          </span>
+                        )}
+                      </div>
+                      <div className="h-64 overflow-y-auto p-3 font-mono text-xs space-y-1">
+                        {isLoadingLogs === campaign.id ? (
+                          <div className="flex items-center justify-center h-full">
+                            <Loader2 className="w-5 h-5 animate-spin text-gray-500" />
+                          </div>
+                        ) : (campaignLogs[campaign.id] || []).length === 0 ? (
+                          <div className="flex items-center justify-center h-full text-gray-600">
+                            No logs yet...
+                          </div>
+                        ) : (
+                          <>
+                            {(campaignLogs[campaign.id] || []).map((log) => (
+                              <div key={log.id} className="flex items-start gap-2">
+                                <span className="text-gray-600 shrink-0">
+                                  {format(new Date(log.created_at), 'HH:mm:ss')}
+                                </span>
+                                {log.level === 'error' && <AlertCircle className="w-3 h-3 text-red-400 mt-0.5 shrink-0" />}
+                                {log.level === 'warning' && <AlertCircle className="w-3 h-3 text-amber-400 mt-0.5 shrink-0" />}
+                                {log.level === 'success' && <CheckCircle className="w-3 h-3 text-emerald-400 mt-0.5 shrink-0" />}
+                                {log.level === 'info' && <Info className="w-3 h-3 text-blue-400 mt-0.5 shrink-0" />}
+                                <span className={`
+                                  ${log.level === 'error' ? 'text-red-400' : ''}
+                                  ${log.level === 'warning' ? 'text-amber-400' : ''}
+                                  ${log.level === 'success' ? 'text-emerald-400' : ''}
+                                  ${log.level === 'info' ? 'text-gray-300' : ''}
+                                `}>
+                                  {log.message}
+                                </span>
+                              </div>
+                            ))}
+                            <div ref={logsEndRef} />
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             ))
