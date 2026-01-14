@@ -8,35 +8,26 @@ function normalizePhoneNumber(phone: string): string {
   return cleaned.startsWith('+') ? cleaned : `+1${cleaned}`;
 }
 
-// Parse spintax and return a random variation
+// Parse spintax and return a random variation (curly braces with pipe-separated options)
 function parseSpintax(template: string): string {
   const spintaxRegex = /\{([^{}]+)\}/g;
   return template.replace(spintaxRegex, (match, group) => {
-    // Skip placeholders like {NAME}, {VEHICLE}, etc.
-    if (['NAME', 'VEHICLE', 'MAKE', 'MODEL'].includes(group.toUpperCase())) {
-      return match;
-    }
     const options = group.split('|');
-    if (options.length === 1) return match; // Not spintax, might be a placeholder
+    if (options.length === 1) return match; // Not spintax, keep as-is
     return options[Math.floor(Math.random() * options.length)];
   });
 }
 
-// Replace placeholders with actual values
+// Replace placeholders with actual values (square bracket format)
 function replacePlaceholders(
   message: string,
   lead: { name?: string; make?: string; model?: string },
   vehicleMode: 'make' | 'model'
 ): string {
   let result = message;
-  result = result.replace(/\{NAME\}/gi, lead.name || 'there');
-  result = result.replace(/\{VEHICLE\}/gi, 
-    vehicleMode === 'model' 
-      ? (lead.model || lead.make || 'vehicle') 
-      : (lead.make || lead.model || 'vehicle')
-  );
-  result = result.replace(/\{MAKE\}/gi, lead.make || '');
-  result = result.replace(/\{MODEL\}/gi, lead.model || '');
+  result = result.replace(/\[Customer Name\]/gi, lead.name || 'there');
+  result = result.replace(/\[Make\]/gi, lead.make || '');
+  result = result.replace(/\[Model\]/gi, lead.model || '');
   return result;
 }
 

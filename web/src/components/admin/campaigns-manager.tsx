@@ -58,8 +58,10 @@ interface CSVLead {
   kijiji_link: string;
 }
 
-// Default spintax message template
-const DEFAULT_MESSAGE_TEMPLATE = `{Hi|Hey|Hello} {NAME}, {I saw|I noticed|I came across} your {VEHICLE} {listing|ad|post} on Kijiji. {I'm very interested|I'd love to learn more|This looks great}! {Is it still available?|Can we chat about it?|Would you be open to selling?}`;
+// Default spintax message templates
+const MAKE_CAMPAIGN_TEMPLATE = `{Hi|Hello|Hey|Hi there} [Customer Name]! {It's|This is} Hunter, {the|the lead} acquisition manager {at|from} Stony Plain Chrysler. {We're looking to|My team and I want to} {refresh|update} our {inventory|pre-owned stock} and {we need more [Make]s on the lot, so yours is|your [Make] is} {at the top of our list|in high demand right now}. We {are offering|can offer} {wholesale value|top market value} + a $1000 {Bonus|Trade-In Credit} if you {would be|are} {willing to consider|open to} trading {it|your vehicle} in {to our dealership|to us}. I {can also|could also} {get|secure} you a {pretty good|fantastic} deal on {any|a} new or {certified pre-owned|CPO} vehicle {on our lot|in stock}. {Would you be interested in hearing|Are you open to seeing|Would you want to hear} what we {can offer you|have to offer}?`;
+
+const MODEL_CAMPAIGN_TEMPLATE = `{Hi|Hello|Hey|Hi there} [Customer Name]! {It's|This is} Hunter, {the|the lead} acquisition manager {at|from} Stony Plain Chrysler. {We're looking to|My team and I want to} {refresh|update} our {inventory|pre-owned stock} and {[Model] is|the [Model] is} {at the top of our list|in high demand right now}. We {are offering|can offer} {wholesale value|top market value} + a $1000 {Bonus|Trade-In Credit} if you {would be|are} {willing to consider|open to} trading {it|your vehicle} in {to our dealership|to us}. I {can also|could also} {get|secure} you a {pretty good|fantastic} deal on {any|a} new or {certified pre-owned|CPO} vehicle {on our lot|in stock}. {Would you be interested in hearing|Are you open to seeing|Would you want to hear} what we {can offer you|have to offer}?`;
 
 // Function to parse spintax and return a random variation
 function parseSpintax(template: string): string {
@@ -70,17 +72,16 @@ function parseSpintax(template: string): string {
   });
 }
 
-// Function to replace placeholders with actual values
+// Function to replace placeholders with actual values (uses square brackets)
 function replacePlaceholders(
   message: string, 
   lead: CSVLead, 
   vehicleMode: 'make' | 'model'
 ): string {
   let result = message;
-  result = result.replace(/\{NAME\}/gi, lead.name || 'there');
-  result = result.replace(/\{VEHICLE\}/gi, vehicleMode === 'model' ? (lead.model || lead.make || 'vehicle') : (lead.make || lead.model || 'vehicle'));
-  result = result.replace(/\{MAKE\}/gi, lead.make || '');
-  result = result.replace(/\{MODEL\}/gi, lead.model || '');
+  result = result.replace(/\[Customer Name\]/gi, lead.name || 'there');
+  result = result.replace(/\[Make\]/gi, lead.make || '');
+  result = result.replace(/\[Model\]/gi, lead.model || '');
   return result;
 }
 
@@ -97,12 +98,22 @@ export function CampaignsManager({ initialCampaigns, organizations, users }: Cam
   const [newCampaign, setNewCampaign] = useState({
     name: '',
     organization_id: '',
-    message_template: DEFAULT_MESSAGE_TEMPLATE,
+    message_template: MODEL_CAMPAIGN_TEMPLATE,
     vehicle_reference_mode: 'model' as 'make' | 'model',
     assignment_mode: 'single_user' as 'single_user' | 'random_distribution',
     assigned_to: '',
     delay_seconds: 65,
   });
+
+  // Update template when vehicle reference mode changes
+  const handleVehicleModeChange = (mode: 'make' | 'model') => {
+    const defaultTemplate = mode === 'make' ? MAKE_CAMPAIGN_TEMPLATE : MODEL_CAMPAIGN_TEMPLATE;
+    setNewCampaign({ 
+      ...newCampaign, 
+      vehicle_reference_mode: mode,
+      message_template: defaultTemplate 
+    });
+  };
 
   const supabase = createClient();
 
@@ -272,7 +283,7 @@ export function CampaignsManager({ initialCampaigns, organizations, users }: Cam
     setNewCampaign({
       name: '',
       organization_id: '',
-      message_template: DEFAULT_MESSAGE_TEMPLATE,
+      message_template: MODEL_CAMPAIGN_TEMPLATE,
       vehicle_reference_mode: 'model',
       assignment_mode: 'single_user',
       assigned_to: '',
@@ -484,7 +495,7 @@ export function CampaignsManager({ initialCampaigns, organizations, users }: Cam
                   <div className="grid grid-cols-2 gap-3">
                     <button
                       type="button"
-                      onClick={() => setNewCampaign({ ...newCampaign, vehicle_reference_mode: 'model' })}
+                      onClick={() => handleVehicleModeChange('model')}
                       className={`p-3 rounded-xl border transition-all ${
                         newCampaign.vehicle_reference_mode === 'model'
                           ? 'border-purple-500 bg-purple-500/10'
@@ -497,7 +508,7 @@ export function CampaignsManager({ initialCampaigns, organizations, users }: Cam
                     </button>
                     <button
                       type="button"
-                      onClick={() => setNewCampaign({ ...newCampaign, vehicle_reference_mode: 'make' })}
+                      onClick={() => handleVehicleModeChange('make')}
                       className={`p-3 rounded-xl border transition-all ${
                         newCampaign.vehicle_reference_mode === 'make'
                           ? 'border-purple-500 bg-purple-500/10'
@@ -522,7 +533,7 @@ export function CampaignsManager({ initialCampaigns, organizations, users }: Cam
                     required
                   />
                   <div className="text-xs text-gray-500 space-y-1">
-                    <p><strong>Placeholders:</strong> {'{NAME}'}, {'{VEHICLE}'}, {'{MAKE}'}, {'{MODEL}'}</p>
+                    <p><strong>Placeholders:</strong> [Customer Name], [Make], [Model]</p>
                     <p><strong>Spintax:</strong> Use {'{option1|option2|option3}'} for random variations</p>
                   </div>
                 </div>
