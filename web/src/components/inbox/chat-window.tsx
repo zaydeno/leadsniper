@@ -354,12 +354,14 @@ export function ChatWindow({
                 </div>
               )}
 
-              {metadata.initiated_by_name && (
+              {(metadata.initiated_by_name || metadata.source === 'campaign') && (
                 <div className="flex items-start gap-2">
                   <UserCircle className="w-4 h-4 text-emerald-400 mt-0.5 shrink-0" />
                   <div>
                     <p className="text-xs text-gray-500">Started By</p>
-                    <p className="text-sm text-white">{metadata.initiated_by_name}</p>
+                    <p className="text-sm text-white">
+                      {metadata.source === 'campaign' ? 'Admin' : metadata.initiated_by_name}
+                    </p>
                     {metadata.initiated_at && (
                       <p className="text-xs text-gray-500">
                         {format(new Date(metadata.initiated_at), 'MMM d, yyyy h:mm a')}
@@ -369,7 +371,7 @@ export function ChatWindow({
                 </div>
               )}
 
-              {metadata.source && (
+              {metadata.source && metadata.source !== 'campaign' && (
                 <div className="flex items-start gap-2">
                   <ExternalLink className="w-4 h-4 text-emerald-400 mt-0.5 shrink-0" />
                   <div>
@@ -389,7 +391,7 @@ export function ChatWindow({
               >
                 <ExternalLink className="w-4 h-4 text-emerald-400 group-hover:text-emerald-300" />
                 <span className="text-sm text-emerald-400 group-hover:text-emerald-300 truncate">
-                  View Original Listing
+                  {metadata.source === 'campaign' ? 'View Kijiji Listing' : 'View Original Listing'}
                 </span>
               </a>
             )}

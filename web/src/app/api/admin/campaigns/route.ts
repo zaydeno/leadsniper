@@ -4,8 +4,45 @@ import { createAdminClient } from '@/lib/supabase/admin';
 
 // Normalize phone number
 function normalizePhoneNumber(phone: string): string {
-  const cleaned = phone.replace(/[^\d+]/g, '');
-  return cleaned.startsWith('+') ? cleaned : `+1${cleaned}`;
+  // Remove all non-digits except +
+  let cleaned = phone.replace(/[^\d+]/g, '');
+  
+  // If it already starts with +, check if it has country code
+  if (cleaned.startsWith('+')) {
+    // If it's +1 followed by 10 digits, it's correct
+    if (cleaned.match(/^\+1\d{10}$/)) {
+      return cleaned;
+    }
+    // If it's + followed by 11 digits (already has country code), return as is
+    if (cleaned.match(/^\+\d{11}$/)) {
+      return cleaned;
+    }
+    // If it's +1 followed by more than 10 digits, might be malformed
+    if (cleaned.startsWith('+1') && cleaned.length > 12) {
+      // Remove extra leading 1s
+      cleaned = cleaned.replace(/^\+1+/, '+1');
+    }
+    return cleaned;
+  }
+  
+  // No + prefix, add it
+  // If it starts with 1 and has 11 digits total, it's already a US number with country code
+  if (cleaned.startsWith('1') && cleaned.length === 11) {
+    return `+${cleaned}`;
+  }
+  
+  // If it's 10 digits, add +1
+  if (cleaned.length === 10) {
+    return `+1${cleaned}`;
+  }
+  
+  // If it's 11 digits and starts with 1, add +
+  if (cleaned.length === 11 && cleaned.startsWith('1')) {
+    return `+${cleaned}`;
+  }
+  
+  // Default: add +1
+  return `+1${cleaned}`;
 }
 
 // Parse spintax and return a random variation (curly braces with pipe-separated options)
