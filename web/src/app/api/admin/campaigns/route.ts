@@ -189,7 +189,20 @@ export async function POST(request: NextRequest) {
     }
 
     // Start processing in background (fire and forget)
-    processCampaign(campaign.id).catch(console.error);
+    // Use setTimeout to ensure it runs in a separate event loop tick
+    setTimeout(() => {
+      processCampaign(campaign.id).catch((error) => {
+        console.error('Campaign processing error:', error);
+        // Log the error to the campaign
+        const errorClient = createAdminClient();
+        errorClient.from('campaign_logs').insert({
+          campaign_id: campaign.id,
+          level: 'error',
+          message: `Campaign processing crashed: ${error instanceof Error ? error.message : 'Unknown error'}`,
+          details: { error: String(error) },
+        }).catch(console.error);
+      });
+    }, 100);
 
     return NextResponse.json({ campaign }, { status: 201 });
   } catch (error) {
@@ -276,21 +289,21 @@ async function processCampaign(campaignId: string) {
 
   for (let i = 0; i < leads.length; i++) {
     const lead = leads[i];
-    await addLog(adminClient, campaignId, 'info', `Processing lead ${i + 1}/${leads.length}: ${lead.name || lead.phone_number}`, { phone: lead.phone_number });
-
-    // Check if campaign is still running
-    const { data: currentCampaign } = await adminClient
-      .from('campaigns')
-      .select('status')
-      .eq('id', campaignId)
-      .single();
-
-    if (!currentCampaign || currentCampaign.status !== 'running') {
-      await addLog(adminClient, campaignId, 'warning', 'Campaign paused or cancelled, stopping processing');
-      break;
-    }
-
+    
     try {
+      await addLog(adminClient, campaignId, 'info', `Processing lead ${i + 1}/${leads.length}: ${lead.name || lead.phone_number}`, { phone: lead.phone_number });
+
+      // Check if campaign is still running
+      const { data: currentCampaign } = await adminClient
+        .from('campaigns')
+        .select('status')
+        .eq('id', campaignId)
+        .single();
+
+      if (!currentCampaign || currentCampaign.status !== 'running') {
+        await addLog(adminClient, campaignId, 'warning', 'Campaign paused or cancelled, stopping processing');
+        break;
+      }
       // Generate message with spintax and placeholders
       const parsedMessage = parseSpintax(campaign.message_template);
       const finalMessage = replacePlaceholders(
@@ -302,22 +315,38 @@ async function processCampaign(campaignId: string) {
 
       await addLog(adminClient, campaignId, 'info', `Sending SMS to ${lead.phone_number}`, { message_preview: finalMessage.substring(0, 100) + '...' });
 
-      // Send SMS
-      const httpsmsResponse = await fetch('https://api.httpsms.com/v1/messages/send', {
-        method: 'POST',
-        headers: {
-          'x-api-key': org.httpsms_api_key,
-          'Accept': 'application/json',
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          content: finalMessage,
-          from: fromNumber,
-          to: lead.phone_number,
-        }),
-      });
+      // Send SMS with timeout
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+      
+      let httpsmsResponse;
+      let httpsmsData;
+      
+      try {
+        httpsmsResponse = await fetch('https://api.httpsms.com/v1/messages/send', {
+          method: 'POST',
+          headers: {
+            'x-api-key': org.httpsms_api_key,
+            'Accept': 'application/json',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            content: finalMessage,
+            from: fromNumber,
+            to: lead.phone_number,
+          }),
+          signal: controller.signal,
+        });
 
-      const httpsmsData = await httpsmsResponse.json();
+        httpsmsData = await httpsmsResponse.json();
+        clearTimeout(timeoutId);
+      } catch (fetchError) {
+        clearTimeout(timeoutId);
+        if (fetchError instanceof Error && fetchError.name === 'AbortError') {
+          throw new Error('SMS send request timed out after 30 seconds');
+        }
+        throw fetchError;
+      }
       
       await addLog(adminClient, campaignId, 'info', `httpSMS API response`, { status: httpsmsData.status, response_ok: httpsmsResponse.ok });
 
@@ -435,29 +464,39 @@ async function processCampaign(campaignId: string) {
 
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : 'Unknown error';
-      await addLog(adminClient, campaignId, 'error', `✗ Exception while processing lead: ${errorMsg}`, { phone: lead.phone_number });
-      
-      await adminClient
-        .from('campaign_leads')
-        .update({ 
-          status: 'failed', 
-          error_message: errorMsg 
-        })
-        .eq('id', lead.id);
+      try {
+        await addLog(adminClient, campaignId, 'error', `✗ Exception while processing lead: ${errorMsg}`, { phone: lead.phone_number, error: String(error) });
+        
+        await adminClient
+          .from('campaign_leads')
+          .update({ 
+            status: 'failed', 
+            error_message: errorMsg 
+          })
+          .eq('id', lead.id);
 
-      await adminClient
-        .from('campaigns')
-        .update({ failed_count: campaign.failed_count + 1 })
-        .eq('id', campaignId);
+        await adminClient
+          .from('campaigns')
+          .update({ failed_count: campaign.failed_count + 1 })
+          .eq('id', campaignId);
 
-      campaign.failed_count += 1;
+        campaign.failed_count += 1;
+      } catch (logError) {
+        console.error('Failed to log error:', logError);
+      }
     }
 
     // Delay before next message (60-70 seconds)
     if (i < leads.length - 1) {
       const delay = campaign.delay_seconds * 1000;
-      await addLog(adminClient, campaignId, 'info', `Waiting ${campaign.delay_seconds} seconds before next message...`);
-      await new Promise(resolve => setTimeout(resolve, delay));
+      try {
+        await addLog(adminClient, campaignId, 'info', `Waiting ${campaign.delay_seconds} seconds before next message...`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+      } catch (delayError) {
+        console.error('Error during delay:', delayError);
+        // Continue anyway
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
     }
   }
 
