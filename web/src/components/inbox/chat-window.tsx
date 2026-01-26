@@ -123,8 +123,17 @@ export function ChatWindow({
     }
   };
 
-  // Extract metadata
-  const metadata = thread.metadata || {};
+  // Extract metadata with proper typing
+  const metadata = (thread.metadata || {}) as {
+    seller_name?: string;
+    vehicle_model?: string;
+    vehicle_make?: string;
+    listing_url?: string;
+    initiated_by_name?: string;
+    initiated_at?: string;
+    campaign_name?: string;
+    source?: string;
+  };
   const hasMetadata = metadata.seller_name || metadata.vehicle_model || metadata.vehicle_make || metadata.listing_url || metadata.initiated_by_name || metadata.campaign_name;
 
   // Auto-scroll to bottom on new messages
