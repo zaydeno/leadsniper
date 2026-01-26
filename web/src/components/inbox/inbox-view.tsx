@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { createClient } from '@/lib/supabase/client';
-import { Thread, Message, Profile } from '@/lib/types';
+import { Thread, Message, Profile, ThreadFlag } from '@/lib/types';
 import { ThreadList } from './thread-list';
 import { ChatWindow } from './chat-window';
 import { MessageSquare } from 'lucide-react';
@@ -190,6 +190,36 @@ export function InboxView({ initialThreads, userProfile }: InboxViewProps) {
     setMessages([]);
   };
 
+  const handleFlagChange = async (flag: ThreadFlag) => {
+    if (!selectedThread) return;
+
+    const response = await fetch(`/api/threads/${selectedThread.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ flag }),
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(data.error || 'Failed to update flag');
+    }
+
+    // Update thread locally
+    setThreads(prev =>
+      prev.map(t =>
+        t.id === selectedThread.id 
+          ? { ...t, flag }
+          : t
+      )
+    );
+
+    // Update selected thread
+    setSelectedThread(prev => 
+      prev ? { ...prev, flag } : null
+    );
+  };
+
   return (
     <div className="h-screen flex overflow-hidden">
       {/* Thread list */}
@@ -219,6 +249,7 @@ export function InboxView({ initialThreads, userProfile }: InboxViewProps) {
             onSendMessage={handleSendMessage}
             onReassign={handleReassign}
             onDelete={handleDelete}
+            onFlagChange={handleFlagChange}
             userProfile={userProfile}
           />
         ) : (

@@ -1,9 +1,9 @@
 'use client';
 
-import { Thread } from '@/lib/types';
+import { Thread, ThreadFlag } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import { formatDistanceToNow } from 'date-fns';
-import { User, Car } from 'lucide-react';
+import { User, Car, Circle, CheckCircle2, XCircle, Clock } from 'lucide-react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 
 interface ThreadListProps {
@@ -11,6 +11,14 @@ interface ThreadListProps {
   selectedThread: Thread | null;
   onSelectThread: (thread: Thread) => void;
 }
+
+// Flag configuration with colors and icons
+const FLAG_CONFIG: Record<ThreadFlag, { label: string; color: string; bgColor: string; icon: typeof Circle }> = {
+  no_response: { label: 'No Response', color: 'text-gray-400', bgColor: 'bg-gray-400/20', icon: Clock },
+  active: { label: 'Active', color: 'text-emerald-400', bgColor: 'bg-emerald-400/20', icon: Circle },
+  booked: { label: 'Booked', color: 'text-blue-400', bgColor: 'bg-blue-400/20', icon: CheckCircle2 },
+  dead: { label: 'Dead', color: 'text-red-400', bgColor: 'bg-red-400/20', icon: XCircle },
+};
 
 export function ThreadList({ threads, selectedThread, onSelectThread }: ThreadListProps) {
   if (threads.length === 0) {
@@ -26,10 +34,19 @@ export function ThreadList({ threads, selectedThread, onSelectThread }: ThreadLi
     );
   }
 
+  // Sort threads: unread first, then by last_message_at (most recent first)
+  const sortedThreads = [...threads].sort((a, b) => {
+    // Unread threads first
+    if (a.unread_count > 0 && b.unread_count === 0) return -1;
+    if (a.unread_count === 0 && b.unread_count > 0) return 1;
+    // Then by most recent message
+    return new Date(b.last_message_at).getTime() - new Date(a.last_message_at).getTime();
+  });
+
   return (
     <ScrollArea className="h-full">
       <div className="p-2 space-y-1">
-        {threads.map((thread) => (
+        {sortedThreads.map((thread) => (
           <button
             key={thread.id}
             onClick={() => onSelectThread(thread)}
@@ -60,16 +77,20 @@ export function ThreadList({ threads, selectedThread, onSelectThread }: ThreadLi
               <div className="flex-1 min-w-0 overflow-hidden">
                 <div className="flex items-center justify-between gap-2">
                   <span className={cn(
-                    'font-medium truncate block max-w-[140px]',
+                    'font-medium truncate block max-w-[110px]',
                     selectedThread?.id === thread.id
                       ? 'text-emerald-400'
                       : 'text-white'
                   )}>
                     {thread.contact_name || (thread.metadata?.seller_name as string) || formatPhoneNumber(thread.contact_phone)}
                   </span>
-                  <span className="text-xs text-gray-500 flex-shrink-0 whitespace-nowrap">
-                    {formatDistanceToNow(new Date(thread.last_message_at), { addSuffix: false })}
-                  </span>
+                  <div className="flex items-center gap-1.5 flex-shrink-0">
+                    {/* Flag badge */}
+                    <FlagBadge flag={thread.flag || 'no_response'} />
+                    <span className="text-xs text-gray-500 whitespace-nowrap">
+                      {formatDistanceToNow(new Date(thread.last_message_at), { addSuffix: false })}
+                    </span>
+                  </div>
                 </div>
 
                 {/* Vehicle model if available */}
@@ -101,6 +122,26 @@ export function ThreadList({ threads, selectedThread, onSelectThread }: ThreadLi
         ))}
       </div>
     </ScrollArea>
+  );
+}
+
+// Flag badge component
+function FlagBadge({ flag }: { flag: ThreadFlag }) {
+  const config = FLAG_CONFIG[flag];
+  const Icon = config.icon;
+  
+  return (
+    <div 
+      className={cn(
+        'flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium',
+        config.bgColor,
+        config.color
+      )}
+      title={config.label}
+    >
+      <Icon className="w-2.5 h-2.5" />
+      <span className="hidden sm:inline">{config.label}</span>
+    </div>
   );
 }
 

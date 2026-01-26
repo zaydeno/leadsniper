@@ -97,19 +97,28 @@ async function upsertThread(
 ) {
   const { data: existing } = await supabase
     .from('threads')
-    .select('id, unread_count')
+    .select('id, unread_count, flag')
     .eq('id', threadId)
     .single();
 
   if (existing) {
+    // Build update object
+    const updateData: Record<string, unknown> = {
+      last_message_at: new Date().toISOString(),
+      last_message_preview: lastMessage.substring(0, 100),
+      unread_count: isInbound ? existing.unread_count + 1 : existing.unread_count,
+      updated_at: new Date().toISOString(),
+    };
+    
+    // Auto-set flag to 'active' when customer responds (inbound message)
+    // Only if current flag is 'no_response' - don't override 'booked' or 'dead'
+    if (isInbound && (existing.flag === 'no_response' || !existing.flag)) {
+      updateData.flag = 'active';
+    }
+
     await supabase
       .from('threads')
-      .update({
-        last_message_at: new Date().toISOString(),
-        last_message_preview: lastMessage.substring(0, 100),
-        unread_count: isInbound ? existing.unread_count + 1 : existing.unread_count,
-        updated_at: new Date().toISOString(),
-      })
+      .update(updateData)
       .eq('id', threadId);
   } else {
     await supabase.from('threads').insert({
@@ -119,6 +128,8 @@ async function upsertThread(
       last_message_preview: lastMessage.substring(0, 100),
       unread_count: isInbound ? 1 : 0,
       organization_id: organizationId,
+      // New threads from inbound messages start as 'active', outbound as 'no_response'
+      flag: isInbound ? 'active' : 'no_response',
     });
   }
 }

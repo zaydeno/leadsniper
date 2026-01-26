@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
-import { Thread, Message, Profile } from '@/lib/types';
+import { Thread, Message, Profile, ThreadFlag } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
 import { 
@@ -18,7 +18,11 @@ import {
   ChevronUp,
   UserPlus,
   Loader2,
-  Trash2
+  Trash2,
+  Circle,
+  CheckCircle2,
+  XCircle,
+  Flag
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -47,8 +51,17 @@ interface ChatWindowProps {
   onSendMessage: (content: string) => Promise<void>;
   onReassign?: (userId: string) => Promise<void>;
   onDelete?: () => Promise<void>;
+  onFlagChange?: (flag: ThreadFlag) => Promise<void>;
   userProfile: Profile | null;
 }
+
+// Flag configuration
+const FLAG_OPTIONS: { value: ThreadFlag; label: string; color: string; bgColor: string; icon: typeof Circle }[] = [
+  { value: 'no_response', label: 'No Response', color: 'text-gray-400', bgColor: 'bg-gray-400/20', icon: Clock },
+  { value: 'active', label: 'Active', color: 'text-emerald-400', bgColor: 'bg-emerald-400/20', icon: Circle },
+  { value: 'booked', label: 'Booked', color: 'text-blue-400', bgColor: 'bg-blue-400/20', icon: CheckCircle2 },
+  { value: 'dead', label: 'Dead', color: 'text-red-400', bgColor: 'bg-red-400/20', icon: XCircle },
+];
 
 export function ChatWindow({ 
   thread, 
@@ -57,6 +70,7 @@ export function ChatWindow({
   onSendMessage,
   onReassign,
   onDelete,
+  onFlagChange,
   userProfile 
 }: ChatWindowProps) {
   const [newMessage, setNewMessage] = useState('');
@@ -67,11 +81,31 @@ export function ChatWindow({
   const [isReassigning, setIsReassigning] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [isChangingFlag, setIsChangingFlag] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
   // Check if user can reassign (org_admin or superadmin)
   const canReassign = userProfile?.role === 'superadmin' || userProfile?.role === 'org_admin';
+  
+  // Get current flag info
+  const currentFlag = thread.flag || 'no_response';
+  const currentFlagConfig = FLAG_OPTIONS.find(f => f.value === currentFlag) || FLAG_OPTIONS[0];
+  
+  // Handle flag change
+  const handleFlagChange = async (flag: ThreadFlag) => {
+    if (!onFlagChange || isChangingFlag || flag === currentFlag) return;
+    
+    setIsChangingFlag(true);
+    try {
+      await onFlagChange(flag);
+      toast.success(`Status changed to ${FLAG_OPTIONS.find(f => f.value === flag)?.label}`);
+    } catch (error) {
+      toast.error('Failed to update status');
+    } finally {
+      setIsChangingFlag(false);
+    }
+  };
 
   // Fetch team members when dropdown opens
   const fetchTeamMembers = async () => {
@@ -190,6 +224,55 @@ export function ChatWindow({
             </div>
           </div>
           <div className="flex items-center gap-2">
+            {/* Flag Selector Dropdown */}
+            {onFlagChange && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className={cn(
+                      'text-xs gap-1.5',
+                      currentFlagConfig.color,
+                      'hover:bg-white/5'
+                    )}
+                    disabled={isChangingFlag}
+                  >
+                    {isChangingFlag ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <currentFlagConfig.icon className="w-3.5 h-3.5" />
+                    )}
+                    {currentFlagConfig.label}
+                    <ChevronDown className="w-3 h-3 ml-0.5" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-40 bg-[#1a1a24] border-gray-800">
+                  <DropdownMenuLabel className="text-gray-400 text-xs">Set Status</DropdownMenuLabel>
+                  <DropdownMenuSeparator className="bg-gray-800" />
+                  {FLAG_OPTIONS.map((option) => {
+                    const Icon = option.icon;
+                    return (
+                      <DropdownMenuItem
+                        key={option.value}
+                        onClick={() => handleFlagChange(option.value)}
+                        className={cn(
+                          'cursor-pointer gap-2',
+                          option.value === currentFlag && 'bg-white/5'
+                        )}
+                      >
+                        <Icon className={cn('w-3.5 h-3.5', option.color)} />
+                        <span className={option.color}>{option.label}</span>
+                        {option.value === currentFlag && (
+                          <Check className="w-3 h-3 ml-auto text-emerald-400" />
+                        )}
+                      </DropdownMenuItem>
+                    );
+                  })}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
+
             {hasMetadata && (
               <Button
                 variant="ghost"

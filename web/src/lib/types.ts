@@ -4,6 +4,9 @@ export type UserRole = 'superadmin' | 'org_admin' | 'sales';
 export type MessageDirection = 'inbound' | 'outbound';
 export type MessageStatus = 'sent' | 'received' | 'failed' | 'pending' | 'delivered' | 'expired';
 
+// Thread flags for conversation status tracking
+export type ThreadFlag = 'no_response' | 'active' | 'booked' | 'dead';
+
 export interface Organization {
   id: string;
   name: string;
@@ -96,6 +99,7 @@ export interface Thread {
   unread_count: number;
   assigned_to: string | null;
   organization_id: string | null;
+  flag: ThreadFlag;
   metadata: ThreadMetadata;
   created_at: string;
   updated_at: string;
