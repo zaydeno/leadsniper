@@ -59,7 +59,7 @@ export default function LandingPage() {
               to private sellers. You just respond to interested leads and close deals.
             </p>
 
-            <div className="flex flex-col sm:flex-row items-center justify-center gap-4 mb-16">
+            <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
               <Link href="/login">
                 <Button size="lg" className="h-14 px-8 bg-emerald-500 hover:bg-emerald-600 shadow-lg shadow-emerald-500/25 font-medium text-base">
                   Get Started
@@ -70,13 +70,6 @@ export default function LandingPage() {
                 <Shield className="w-4 h-4" />
                 Invite only • Contact for access
               </div>
-            </div>
-
-            {/* Stats */}
-            <div className="grid grid-cols-3 gap-8 max-w-2xl mx-auto">
-              <StatItem value="500+" label="Leads Generated" />
-              <StatItem value="45%" label="Response Rate" />
-              <StatItem value="24/7" label="Campaign Running" />
             </div>
           </div>
         </div>
@@ -269,17 +262,6 @@ export default function LandingPage() {
           </div>
         </footer>
       </main>
-    </div>
-  );
-}
-
-function StatItem({ value, label }: { value: string; label: string }) {
-  return (
-    <div className="text-center">
-      <div className="text-3xl md:text-4xl font-bold bg-gradient-to-r from-emerald-400 to-cyan-400 bg-clip-text text-transparent">
-        {value}
-      </div>
-      <div className="text-gray-500 text-sm mt-1">{label}</div>
     </div>
   );
 }
