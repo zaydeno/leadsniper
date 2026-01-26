@@ -16,6 +16,7 @@ import {
   Shield,
   Users,
   Building2,
+  BarChart3,
 } from 'lucide-react';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import {
@@ -48,13 +49,14 @@ export function Sidebar({ user, profile }: SidebarProps) {
 
   const navigation = [
     { name: 'Inbox', href: '/dashboard', icon: MessageSquare },
+    { name: 'Stats', href: '/dashboard/stats', icon: BarChart3 },
     { name: 'Missed Calls', href: '/dashboard/calls', icon: Phone },
     { name: 'Settings', href: '/dashboard/settings', icon: Settings },
   ];
 
   // Add org admin features
   if (profile?.role === 'org_admin') {
-    navigation.splice(2, 0, { name: 'Team', href: '/dashboard/team', icon: Users });
+    navigation.splice(3, 0, { name: 'Team', href: '/dashboard/team', icon: Users });
   }
 
   const roleLabels = {
