@@ -2,7 +2,7 @@
 
 export type UserRole = 'superadmin' | 'org_admin' | 'sales';
 export type MessageDirection = 'inbound' | 'outbound';
-export type MessageStatus = 'sent' | 'received' | 'failed' | 'pending';
+export type MessageStatus = 'sent' | 'received' | 'failed' | 'pending' | 'delivered' | 'expired';
 
 export interface Organization {
   id: string;
