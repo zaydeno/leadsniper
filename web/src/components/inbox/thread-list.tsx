@@ -65,7 +65,7 @@ export function ThreadList({ threads, selectedThread, onSelectThread }: ThreadLi
                       ? 'text-emerald-400'
                       : 'text-white'
                   )}>
-                    {thread.contact_name || thread.metadata?.seller_name || formatPhoneNumber(thread.contact_phone)}
+                    {thread.contact_name || (thread.metadata?.seller_name as string) || formatPhoneNumber(thread.contact_phone)}
                   </span>
                   <span className="text-xs text-gray-500 flex-shrink-0 whitespace-nowrap">
                     {formatDistanceToNow(new Date(thread.last_message_at), { addSuffix: false })}
@@ -77,7 +77,7 @@ export function ThreadList({ threads, selectedThread, onSelectThread }: ThreadLi
                   <div className="flex items-center gap-1 mt-0.5 overflow-hidden">
                     <Car className="w-3 h-3 text-gray-500 flex-shrink-0" />
                     <span className="text-xs text-gray-500 truncate block">
-                      {thread.metadata.vehicle_model}
+                      {thread.metadata.vehicle_model as string}
                     </span>
                   </div>
                 )}
