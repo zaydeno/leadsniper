@@ -156,3 +156,92 @@ export interface CreateOrganizationRequest {
   httpsms_api_key?: string;
   httpsms_from_number?: string;
 }
+
+// Campaign Types
+export type CampaignStatus = 'draft' | 'running' | 'paused' | 'completed' | 'cancelled';
+export type CampaignAssignmentMode = 'single_user' | 'random_distribution';
+export type VehicleReferenceMode = 'make' | 'model';
+
+export interface Campaign {
+  id: string;
+  name: string;
+  organization_id: string;
+  status: CampaignStatus;
+  assignment_mode: CampaignAssignmentMode;
+  assigned_to: string | null;
+  message_template: string;
+  vehicle_reference_mode: VehicleReferenceMode;
+  use_customer_name: boolean;
+  total_leads: number;
+  sent_count: number;
+  failed_count: number;
+  current_lead_index: number;
+  delay_seconds: number;
+  started_at: string | null;
+  completed_at: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+  // Joined data
+  organization?: Organization;
+  creator?: Profile;
+}
+
+export interface CampaignLead {
+  id: string;
+  campaign_id: string;
+  phone_number: string;
+  name: string | null;
+  make: string | null;
+  model: string | null;
+  kijiji_link: string | null;
+  status: 'pending' | 'sent' | 'failed' | 'skipped';
+  error_message: string | null;
+  sent_at: string | null;
+  assigned_to: string | null;
+  lead_order: number;
+  created_at: string;
+}
+
+export interface CampaignCSVRow {
+  phone_number: string;
+  name?: string;
+  make?: string;
+  model?: string;
+  kijiji_link?: string;
+}
+
+// UPS (Up System) Types
+export interface UpsTeamMember {
+  id: string;
+  organization_id: string;
+  name: string;
+  phone_number: string;
+  is_active: boolean;
+  display_order: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface UpsLocation {
+  id: string;
+  organization_id: string;
+  name: string;
+  display_order: number;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface UpsAlertLog {
+  id: string;
+  organization_id: string;
+  location_id: string;
+  sent_by: string;
+  recipients: string[];
+  message_content: string;
+  created_at: string;
+  // Joined data
+  location?: UpsLocation;
+  sender?: Profile;
+}
