@@ -63,9 +63,10 @@ function replacePlaceholders(
   useCustomerName: boolean = true
 ): string {
   let result = message;
-  // When not using customer name, replace placeholder with empty string (template should already have generic greeting)
-  // When using customer name, use the name or fallback to 'there'
-  result = result.replace(/\[Customer Name\]/gi, useCustomerName ? (lead.name || 'there') : '');
+  // When using customer name: use name or fallback to 'there'
+  // When NOT using customer name: always use 'there'
+  // Note: Template should use greetings like {Hi|Hello} NOT {Hi there|Hello} to avoid duplication
+  result = result.replace(/\[Customer Name\]/gi, useCustomerName ? (lead.name || 'there') : 'there');
   result = result.replace(/\[Make\]/gi, lead.make || '');
   result = result.replace(/\[Model\]/gi, lead.model || '');
   return result;
