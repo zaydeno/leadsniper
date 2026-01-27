@@ -61,6 +61,13 @@ interface CSVLead {
   make: string;
   model: string;
   kijiji_link: string;
+  is_duplicate?: boolean;
+}
+
+interface DuplicateInfo {
+  phone_number: string;
+  existing_thread_id: string;
+  existing_contact_name: string | null;
 }
 
 interface CampaignLog {
@@ -111,6 +118,11 @@ export function CampaignsManager({ initialCampaigns, organizations, users }: Cam
   const [csvFileName, setCsvFileName] = useState<string | null>(null);
   const [previewMessage, setPreviewMessage] = useState<string>('');
   const fileInputRef = useRef<HTMLInputElement>(null);
+  
+  // Duplicate detection state
+  const [duplicates, setDuplicates] = useState<DuplicateInfo[]>([]);
+  const [isCheckingDuplicates, setIsCheckingDuplicates] = useState(false);
+  const [includeDuplicates, setIncludeDuplicates] = useState(false);
   
   // Log viewer state
   const [expandedLogs, setExpandedLogs] = useState<string | null>(null);
@@ -277,10 +289,53 @@ export function CampaignsManager({ initialCampaigns, organizations, users }: Cam
       }
 
       setCsvLeads(leads);
+      setIncludeDuplicates(false); // Reset override when new CSV is uploaded
       toast.success(`Loaded ${leads.length} leads from CSV`);
+      
+      // Check for duplicates
+      checkDuplicates(leads);
     };
 
     reader.readAsText(file);
+  };
+
+  // Check for duplicate phone numbers against existing threads
+  const checkDuplicates = async (leads: CSVLead[]) => {
+    if (leads.length === 0) return;
+    
+    setIsCheckingDuplicates(true);
+    setDuplicates([]);
+    
+    try {
+      const response = await fetch('/api/admin/campaigns/check-duplicates', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          phone_numbers: leads.map(l => l.phone_number),
+        }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setDuplicates(data.duplicates || []);
+        
+        // Mark duplicates in the leads array
+        const duplicatePhones = new Set(data.duplicates.map((d: DuplicateInfo) => d.phone_number));
+        const updatedLeads = leads.map(lead => ({
+          ...lead,
+          is_duplicate: duplicatePhones.has(lead.phone_number),
+        }));
+        setCsvLeads(updatedLeads);
+        
+        if (data.duplicates_found > 0) {
+          toast.warning(`Found ${data.duplicates_found} duplicate phone number(s) already in the system`);
+        }
+      }
+    } catch (error) {
+      console.error('Error checking duplicates:', error);
+    } finally {
+      setIsCheckingDuplicates(false);
+    }
   };
 
   // Create campaign
@@ -305,13 +360,24 @@ export function CampaignsManager({ initialCampaigns, organizations, users }: Cam
     setIsCreating(true);
 
     try {
+      // Filter out duplicates if not including them
+      const leadsToSend = includeDuplicates 
+        ? csvLeads 
+        : csvLeads.filter(l => !l.is_duplicate);
+      
+      if (leadsToSend.length === 0) {
+        toast.error('No leads to send - all are duplicates');
+        setIsCreating(false);
+        return;
+      }
+
       // Create campaign via API
       const response = await fetch('/api/admin/campaigns', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           ...newCampaign,
-          leads: csvLeads,
+          leads: leadsToSend,
         }),
       });
 
@@ -389,6 +455,8 @@ export function CampaignsManager({ initialCampaigns, organizations, users }: Cam
     setCsvLeads([]);
     setCsvFileName(null);
     setPreviewMessage('');
+    setDuplicates([]);
+    setIncludeDuplicates(false);
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
@@ -513,6 +581,76 @@ export function CampaignsManager({ initialCampaigns, organizations, users }: Cam
                     )}
                   </div>
                 </div>
+
+                {/* Duplicate Detection Warning */}
+                {csvLeads.length > 0 && (
+                  <div className="space-y-3">
+                    {isCheckingDuplicates ? (
+                      <div className="flex items-center gap-2 text-gray-400 text-sm">
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        Checking for duplicates...
+                      </div>
+                    ) : duplicates.length > 0 ? (
+                      <div className="p-4 rounded-xl border border-amber-500/30 bg-amber-500/10">
+                        <div className="flex items-start gap-3">
+                          <AlertCircle className="w-5 h-5 text-amber-400 flex-shrink-0 mt-0.5" />
+                          <div className="flex-1">
+                            <p className="text-amber-400 font-medium">
+                              {duplicates.length} duplicate{duplicates.length > 1 ? 's' : ''} found
+                            </p>
+                            <p className="text-sm text-amber-400/80 mt-1">
+                              {duplicates.length} phone number{duplicates.length > 1 ? 's' : ''} already exist in the inbox
+                            </p>
+                            
+                            {/* Show duplicate details (max 5) */}
+                            <div className="mt-2 space-y-1">
+                              {duplicates.slice(0, 5).map((dup, i) => (
+                                <p key={i} className="text-xs text-amber-400/60">
+                                  • {dup.phone_number} {dup.existing_contact_name && `(${dup.existing_contact_name})`}
+                                </p>
+                              ))}
+                              {duplicates.length > 5 && (
+                                <p className="text-xs text-amber-400/60">
+                                  ...and {duplicates.length - 5} more
+                                </p>
+                              )}
+                            </div>
+
+                            {/* Override Toggle */}
+                            <div className="mt-3 flex items-center gap-3">
+                              <button
+                                type="button"
+                                onClick={() => setIncludeDuplicates(!includeDuplicates)}
+                                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                                  includeDuplicates ? 'bg-amber-500' : 'bg-gray-700'
+                                }`}
+                              >
+                                <span
+                                  className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                                    includeDuplicates ? 'translate-x-6' : 'translate-x-1'
+                                  }`}
+                                />
+                              </button>
+                              <span className="text-sm text-amber-400/80">
+                                {includeDuplicates ? 'Including duplicates' : 'Skipping duplicates'}
+                              </span>
+                            </div>
+
+                            {/* Lead count summary */}
+                            <p className="text-xs text-gray-500 mt-2">
+                              Will send to: {includeDuplicates ? csvLeads.length : csvLeads.length - duplicates.length} leads
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-2 text-emerald-400 text-sm">
+                        <CheckCircle className="w-4 h-4" />
+                        No duplicates found - all leads are new
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 {/* Assignment Mode */}
                 <div className="space-y-2">
