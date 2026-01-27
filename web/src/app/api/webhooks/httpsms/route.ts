@@ -482,19 +482,45 @@ async function handlePhoneOnline(
 
 export async function POST(request: NextRequest) {
   const startTime = Date.now();
+  const supabase = createAdminClient();
+  
+  // Get headers for logging
+  const headers: Record<string, string> = {};
+  request.headers.forEach((value, key) => {
+    headers[key] = value;
+  });
+  
+  // Get source IP
+  const sourceIp = request.headers.get('x-forwarded-for') || 
+                   request.headers.get('x-real-ip') || 
+                   'unknown';
+
+  let body: Record<string, unknown> = {};
+  let eventType: string | null = null;
 
   try {
-    const body = await request.json();
-    const supabase = createAdminClient();
-
+    body = await request.json();
+    
     // Get event type from header or body (CloudEvents format)
-    const eventType =
+    eventType =
       request.headers.get('X-Event-Type') ||
-      body.type ||
-      body.event_type;
+      (body.type as string) ||
+      (body.event_type as string) ||
+      null;
+
+    // LOG EVERY INCOMING WEBHOOK REQUEST
+    await supabase.from('webhook_logs').insert({
+      event_type: eventType,
+      headers: headers,
+      body: body,
+      source_ip: sourceIp,
+      processed: false,
+    });
 
     console.log(`\n🔔 Webhook received: ${eventType}`);
+    console.log('Headers:', JSON.stringify(headers, null, 2));
     console.log('Payload:', JSON.stringify(body, null, 2));
+    console.log('Source IP:', sourceIp);
 
     // Extract data from CloudEvents format
     const data = body.data || body;
@@ -542,10 +568,28 @@ export async function POST(request: NextRequest) {
     const duration = Date.now() - startTime;
     console.log(`✓ Webhook processed in ${duration}ms\n`);
 
+    // Update log as processed
+    await supabase
+      .from('webhook_logs')
+      .update({ processed: true })
+      .eq('event_type', eventType)
+      .order('created_at', { ascending: false })
+      .limit(1);
+
     return NextResponse.json(result);
   } catch (error) {
     const duration = Date.now() - startTime;
     console.error(`✗ Webhook error after ${duration}ms:`, error);
+
+    // Log the error
+    await supabase.from('webhook_logs').insert({
+      event_type: eventType || 'PARSE_ERROR',
+      headers: headers,
+      body: body,
+      source_ip: sourceIp,
+      processed: false,
+      error: String(error),
+    });
 
     return NextResponse.json(
       { error: 'Internal server error', details: String(error) },
