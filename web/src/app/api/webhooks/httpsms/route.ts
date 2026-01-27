@@ -495,7 +495,7 @@ export async function POST(request: NextRequest) {
                    request.headers.get('x-real-ip') || 
                    'unknown';
 
-  let body: Record<string, unknown> = {};
+  let body: Record<string, unknown> = {} as Record<string, unknown>;
   let eventType: string | null = null;
 
   try {
@@ -523,7 +523,7 @@ export async function POST(request: NextRequest) {
     console.log('Source IP:', sourceIp);
 
     // Extract data from CloudEvents format
-    const data = body.data || body;
+    const data = (body.data || body) as Record<string, unknown>;
 
     // Route to appropriate handler
     let result;
