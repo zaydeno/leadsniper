@@ -94,7 +94,9 @@ function replacePlaceholders(
   useCustomerName: boolean = true
 ): string {
   let result = message;
-  result = result.replace(/\[Customer Name\]/gi, useCustomerName ? (lead.name || 'there') : 'there');
+  // When not using customer name, replace placeholder with empty string (template should already have generic greeting)
+  // When using customer name, use the name or fallback to 'there'
+  result = result.replace(/\[Customer Name\]/gi, useCustomerName ? (lead.name || 'there') : '');
   result = result.replace(/\[Make\]/gi, lead.make || '');
   result = result.replace(/\[Model\]/gi, lead.model || '');
   return result;
