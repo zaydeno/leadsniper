@@ -165,11 +165,13 @@ export interface CreateOrganizationRequest {
 export type CampaignStatus = 'draft' | 'running' | 'paused' | 'completed' | 'cancelled';
 export type CampaignAssignmentMode = 'single_user' | 'random_distribution';
 export type VehicleReferenceMode = 'make' | 'model';
+export type CampaignType = 'normal' | 'custom';
 
 export interface Campaign {
   id: string;
   name: string;
   organization_id: string;
+  campaign_type: CampaignType;
   status: CampaignStatus;
   assignment_mode: CampaignAssignmentMode;
   assigned_to: string | null;
@@ -199,6 +201,10 @@ export interface CampaignLead {
   make: string | null;
   model: string | null;
   kijiji_link: string | null;
+  // Custom campaign fields
+  salesperson: string | null;
+  month: string | null;
+  custom_fields: Record<string, string> | null;
   status: 'pending' | 'sent' | 'failed' | 'skipped';
   error_message: string | null;
   sent_at: string | null;
@@ -213,6 +219,10 @@ export interface CampaignCSVRow {
   make?: string;
   model?: string;
   kijiji_link?: string;
+  // Custom campaign fields
+  salesperson?: string;
+  month?: string;
+  [key: string]: string | undefined;
 }
 
 // UPS (Up System) Types

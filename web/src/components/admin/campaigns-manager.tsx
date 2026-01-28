@@ -44,7 +44,9 @@ import {
   Terminal,
   AlertCircle,
   Info,
-  CheckCircle
+  CheckCircle,
+  Sparkles,
+  Settings2
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
@@ -61,6 +63,10 @@ interface CSVLead {
   make: string;
   model: string;
   kijiji_link: string;
+  // Custom campaign fields
+  salesperson: string;
+  month: string;
+  custom_fields: Record<string, string>;
   is_duplicate?: boolean;
 }
 
@@ -83,6 +89,8 @@ interface CampaignLog {
 const MAKE_CAMPAIGN_TEMPLATE = `{Hi|Hello|Hey|Hi there} [Customer Name]! {It's|This is} Hunter, {the|the lead} acquisition manager {at|from} Stony Plain Chrysler. {We're looking to|My team and I want to} {refresh|update} our {inventory|pre-owned stock} and {we need more [Make]'s on the lot, so yours is|your [Make] is} {at the top of our list|in high demand right now}. We {are offering|can offer} {wholesale value|top market value} + a $1000 {Bonus|Trade-In Credit} if you {would be|are} {willing to consider|open to} trading {it|your vehicle} in {to our dealership|to us}. I {can also|could also} {get|secure} you a {pretty good|fantastic} deal on {any|a} new or {certified pre-owned|CPO} vehicle {on our lot|in stock}. {Would you be interested in hearing|Are you open to seeing|Would you want to hear} what we {can offer you|have to offer}?`;
 
 const MODEL_CAMPAIGN_TEMPLATE = `{Hi|Hello|Hey|Hi there} [Customer Name]! {It's|This is} Hunter, {the|the lead} acquisition manager {at|from} Stony Plain Chrysler. {We're looking to|My team and I want to} {refresh|update} our {inventory|pre-owned stock} and {[Model] is|the [Model] is} {at the top of our list|in high demand right now}. We {are offering|can offer} {wholesale value|top market value} + a $1000 {Bonus|Trade-In Credit} if you {would be|are} {willing to consider|open to} trading {it|your vehicle} in {to our dealership|to us}. I {can also|could also} {get|secure} you a {pretty good|fantastic} deal on {any|a} new or {certified pre-owned|CPO} vehicle {on our lot|in stock}. {Would you be interested in hearing|Are you open to seeing|Would you want to hear} what we {can offer you|have to offer}?`;
+
+const CUSTOM_CAMPAIGN_TEMPLATE = `{Hi|Hello|Hey} [Customer Name]! This is [Salesperson] from Stony Plain Chrysler. Your message here using [Make], [Model], [Month], or any other custom field.`;
 
 // Function to parse spintax and return a random variation
 function parseSpintax(template: string): string {
@@ -107,6 +115,18 @@ function replacePlaceholders(
   result = result.replace(/\[Customer Name\]/gi, useCustomerName ? (lead.name || 'there') : 'there');
   result = result.replace(/\[Make\]/gi, lead.make || '');
   result = result.replace(/\[Model\]/gi, lead.model || '');
+  // Custom campaign fields
+  result = result.replace(/\[Salesperson\]/gi, lead.salesperson || '');
+  result = result.replace(/\[Month\]/gi, lead.month || '');
+  
+  // Replace any custom fields from the custom_fields object
+  if (lead.custom_fields) {
+    for (const [key, value] of Object.entries(lead.custom_fields)) {
+      const regex = new RegExp(`\\[${key}\\]`, 'gi');
+      result = result.replace(regex, value || '');
+    }
+  }
+  
   return result;
 }
 
@@ -134,6 +154,7 @@ export function CampaignsManager({ initialCampaigns, organizations, users }: Cam
   const [newCampaign, setNewCampaign] = useState({
     name: '',
     organization_id: '',
+    campaign_type: 'normal' as 'normal' | 'custom',
     message_template: MODEL_CAMPAIGN_TEMPLATE,
     vehicle_reference_mode: 'model' as 'make' | 'model',
     assignment_mode: 'single_user' as 'single_user' | 'random_distribution',
@@ -141,15 +162,53 @@ export function CampaignsManager({ initialCampaigns, organizations, users }: Cam
     delay_seconds: 65,
     use_customer_name: true,
   });
+  
+  // Track detected CSV headers for custom campaigns
+  const [detectedHeaders, setDetectedHeaders] = useState<string[]>([]);
 
   // Update template when vehicle reference mode changes
   const handleVehicleModeChange = (mode: 'make' | 'model') => {
-    const defaultTemplate = mode === 'make' ? MAKE_CAMPAIGN_TEMPLATE : MODEL_CAMPAIGN_TEMPLATE;
-    setNewCampaign({ 
-      ...newCampaign, 
-      vehicle_reference_mode: mode,
-      message_template: defaultTemplate 
-    });
+    // Only update template for normal campaigns
+    if (newCampaign.campaign_type === 'normal') {
+      const defaultTemplate = mode === 'make' ? MAKE_CAMPAIGN_TEMPLATE : MODEL_CAMPAIGN_TEMPLATE;
+      setNewCampaign({ 
+        ...newCampaign, 
+        vehicle_reference_mode: mode,
+        message_template: defaultTemplate 
+      });
+    } else {
+      setNewCampaign({ 
+        ...newCampaign, 
+        vehicle_reference_mode: mode,
+      });
+    }
+  };
+  
+  // Handle campaign type change
+  const handleCampaignTypeChange = (type: 'normal' | 'custom') => {
+    if (type === 'custom') {
+      setNewCampaign({
+        ...newCampaign,
+        campaign_type: type,
+        message_template: CUSTOM_CAMPAIGN_TEMPLATE,
+      });
+    } else {
+      const defaultTemplate = newCampaign.vehicle_reference_mode === 'make' 
+        ? MAKE_CAMPAIGN_TEMPLATE 
+        : MODEL_CAMPAIGN_TEMPLATE;
+      setNewCampaign({
+        ...newCampaign,
+        campaign_type: type,
+        message_template: defaultTemplate,
+      });
+    }
+    // Clear CSV when switching types
+    setCsvLeads([]);
+    setCsvFileName(null);
+    setDetectedHeaders([]);
+    setDuplicates([]);
+    setIncludeDuplicates(false);
+    if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
   const supabase = createClient();
@@ -238,7 +297,7 @@ export function CampaignsManager({ initialCampaigns, organizations, users }: Cam
     }
   }, [newCampaign.message_template, newCampaign.vehicle_reference_mode, newCampaign.use_customer_name, csvLeads]);
 
-  // Parse CSV file
+  // Parse CSV file - handles both normal and custom campaign formats
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -255,17 +314,26 @@ export function CampaignsManager({ initialCampaigns, organizations, users }: Cam
         return;
       }
 
-      // Parse headers (case-insensitive mapping)
-      const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
+      // Parse headers - preserve original names for custom fields
+      const rawHeaders = lines[0].split(',').map(h => h.trim());
+      const headers = rawHeaders.map(h => h.toLowerCase());
       
-      // Map headers to expected fields
+      // Map headers to expected fields (flexible matching)
       const headerMap: Record<string, number> = {};
+      const customHeaders: string[] = [];
+      
       headers.forEach((h, i) => {
         if (h.includes('phone')) headerMap.phone_number = i;
-        else if (h === 'name') headerMap.name = i;
+        else if (h === 'name' || h === 'customer name' || h === 'customername') headerMap.name = i;
         else if (h === 'make') headerMap.make = i;
         else if (h === 'model') headerMap.model = i;
         else if (h.includes('kijiji') || h.includes('link')) headerMap.kijiji_link = i;
+        else if (h === 'salesperson' || h === 'sales person' || h === 'rep') headerMap.salesperson = i;
+        else if (h === 'month') headerMap.month = i;
+        else {
+          // Track custom headers for custom campaigns
+          customHeaders.push(rawHeaders[i]); // Use original case
+        }
       });
 
       if (headerMap.phone_number === undefined) {
@@ -273,24 +341,74 @@ export function CampaignsManager({ initialCampaigns, organizations, users }: Cam
         return;
       }
 
-      // Parse data rows
+      // For custom campaigns, store all detected headers
+      if (newCampaign.campaign_type === 'custom') {
+        const allHeaders = rawHeaders.filter(h => !h.toLowerCase().includes('phone'));
+        setDetectedHeaders(allHeaders);
+      }
+
+      // Parse data rows with improved CSV parsing (handles quoted fields)
+      const parseCSVLine = (line: string): string[] => {
+        const result: string[] = [];
+        let current = '';
+        let inQuotes = false;
+        
+        for (let i = 0; i < line.length; i++) {
+          const char = line[i];
+          if (char === '"') {
+            inQuotes = !inQuotes;
+          } else if (char === ',' && !inQuotes) {
+            result.push(current.trim());
+            current = '';
+          } else {
+            current += char;
+          }
+        }
+        result.push(current.trim());
+        return result;
+      };
+
       const leads: CSVLead[] = [];
       for (let i = 1; i < lines.length; i++) {
-        const values = lines[i].split(',').map(v => v.trim());
+        const values = parseCSVLine(lines[i]);
         if (values[headerMap.phone_number]) {
+          // Build custom fields object for any non-standard headers
+          const custom_fields: Record<string, string> = {};
+          headers.forEach((h, idx) => {
+            // Skip standard fields
+            if (['phone', 'name', 'customer name', 'customername', 'make', 'model', 'kijiji', 'link', 
+                 'salesperson', 'sales person', 'rep', 'month'].some(std => h.includes(std) || h === std)) {
+              return;
+            }
+            // Add to custom fields using original header name
+            if (values[idx]) {
+              custom_fields[rawHeaders[idx]] = values[idx];
+            }
+          });
+          
           leads.push({
             phone_number: values[headerMap.phone_number] || '',
             name: headerMap.name !== undefined ? values[headerMap.name] || '' : '',
             make: headerMap.make !== undefined ? values[headerMap.make] || '' : '',
             model: headerMap.model !== undefined ? values[headerMap.model] || '' : '',
             kijiji_link: headerMap.kijiji_link !== undefined ? values[headerMap.kijiji_link] || '' : '',
+            salesperson: headerMap.salesperson !== undefined ? values[headerMap.salesperson] || '' : '',
+            month: headerMap.month !== undefined ? values[headerMap.month] || '' : '',
+            custom_fields: Object.keys(custom_fields).length > 0 ? custom_fields : {},
           });
         }
       }
 
       setCsvLeads(leads);
       setIncludeDuplicates(false); // Reset override when new CSV is uploaded
-      toast.success(`Loaded ${leads.length} leads from CSV`);
+      
+      // Show different success message for custom campaigns
+      if (newCampaign.campaign_type === 'custom') {
+        const fieldsFound = Object.keys(headerMap).filter(k => k !== 'phone_number').length;
+        toast.success(`Loaded ${leads.length} leads with ${fieldsFound} recognized fields`);
+      } else {
+        toast.success(`Loaded ${leads.length} leads from CSV`);
+      }
       
       // Check for duplicates
       checkDuplicates(leads);
@@ -445,6 +563,7 @@ export function CampaignsManager({ initialCampaigns, organizations, users }: Cam
     setNewCampaign({
       name: '',
       organization_id: '',
+      campaign_type: 'normal',
       message_template: MODEL_CAMPAIGN_TEMPLATE,
       vehicle_reference_mode: 'model',
       assignment_mode: 'single_user',
@@ -457,6 +576,7 @@ export function CampaignsManager({ initialCampaigns, organizations, users }: Cam
     setPreviewMessage('');
     setDuplicates([]);
     setIncludeDuplicates(false);
+    setDetectedHeaders([]);
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
@@ -508,6 +628,39 @@ export function CampaignsManager({ initialCampaigns, organizations, users }: Cam
               </DialogHeader>
               
               <form onSubmit={handleCreateCampaign} className="space-y-6 mt-4">
+                {/* Campaign Type Toggle */}
+                <div className="space-y-2">
+                  <Label className="text-gray-400">Campaign Type</Label>
+                  <div className="grid grid-cols-2 gap-3">
+                    <button
+                      type="button"
+                      onClick={() => handleCampaignTypeChange('normal')}
+                      className={`p-3 rounded-xl border transition-all ${
+                        newCampaign.campaign_type === 'normal'
+                          ? 'border-purple-500 bg-purple-500/10'
+                          : 'border-gray-800 hover:border-gray-700'
+                      }`}
+                    >
+                      <Megaphone className="w-5 h-5 mx-auto mb-1 text-purple-400" />
+                      <p className="text-sm text-white font-medium">Normal Campaign</p>
+                      <p className="text-xs text-gray-500">Standard vehicle acquisition</p>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleCampaignTypeChange('custom')}
+                      className={`p-3 rounded-xl border transition-all ${
+                        newCampaign.campaign_type === 'custom'
+                          ? 'border-pink-500 bg-pink-500/10'
+                          : 'border-gray-800 hover:border-gray-700'
+                      }`}
+                    >
+                      <Sparkles className="w-5 h-5 mx-auto mb-1 text-pink-400" />
+                      <p className="text-sm text-white font-medium">Custom Campaign</p>
+                      <p className="text-xs text-gray-500">Fully custom message & fields</p>
+                    </button>
+                  </div>
+                </div>
+
                 {/* Campaign Name */}
                 <div className="space-y-2">
                   <Label className="text-gray-400">Campaign Name</Label>
@@ -554,7 +707,11 @@ export function CampaignsManager({ initialCampaigns, organizations, users }: Cam
                 <div className="space-y-2">
                   <Label className="text-gray-400">Upload Leads CSV</Label>
                   <div 
-                    className="border-2 border-dashed border-gray-700 rounded-xl p-6 text-center hover:border-purple-500/50 transition-colors cursor-pointer"
+                    className={`border-2 border-dashed rounded-xl p-6 text-center transition-colors cursor-pointer ${
+                      newCampaign.campaign_type === 'custom' 
+                        ? 'border-pink-700 hover:border-pink-500/50' 
+                        : 'border-gray-700 hover:border-purple-500/50'
+                    }`}
                     onClick={() => fileInputRef.current?.click()}
                   >
                     <input
@@ -565,18 +722,42 @@ export function CampaignsManager({ initialCampaigns, organizations, users }: Cam
                       className="hidden"
                     />
                     {csvFileName ? (
-                      <div className="flex items-center justify-center gap-2">
-                        <FileText className="w-5 h-5 text-emerald-400" />
-                        <span className="text-emerald-400">{csvFileName}</span>
-                        <Badge className="bg-emerald-500/10 text-emerald-400">
-                          {csvLeads.length} leads
-                        </Badge>
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-center gap-2">
+                          <FileText className="w-5 h-5 text-emerald-400" />
+                          <span className="text-emerald-400">{csvFileName}</span>
+                          <Badge className="bg-emerald-500/10 text-emerald-400">
+                            {csvLeads.length} leads
+                          </Badge>
+                        </div>
+                        {/* Show detected headers for custom campaigns */}
+                        {newCampaign.campaign_type === 'custom' && detectedHeaders.length > 0 && (
+                          <div className="mt-2 text-xs text-gray-500">
+                            <p className="text-pink-400 mb-1">Detected fields:</p>
+                            <div className="flex flex-wrap gap-1 justify-center">
+                              {detectedHeaders.map((header, idx) => (
+                                <span key={idx} className="px-2 py-0.5 bg-pink-500/10 text-pink-400 rounded">
+                                  [{header}]
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
                       </div>
                     ) : (
                       <>
-                        <Upload className="w-8 h-8 text-gray-500 mx-auto mb-2" />
+                        <Upload className={`w-8 h-8 mx-auto mb-2 ${
+                          newCampaign.campaign_type === 'custom' ? 'text-pink-500' : 'text-gray-500'
+                        }`} />
                         <p className="text-sm text-gray-500">Click to upload CSV file</p>
-                        <p className="text-xs text-gray-600 mt-1">Headers: Phone number, Name, Make, Model, Kijiji Link</p>
+                        {newCampaign.campaign_type === 'custom' ? (
+                          <div className="text-xs text-gray-600 mt-1 space-y-1">
+                            <p className="text-pink-400">Required: Phone Number</p>
+                            <p>Optional: Customer Name, Salesperson, Month, Make, Model, + any custom fields</p>
+                          </div>
+                        ) : (
+                          <p className="text-xs text-gray-600 mt-1">Headers: Phone number, Name, Make, Model, Kijiji Link</p>
+                        )}
                       </>
                     )}
                   </div>
@@ -802,8 +983,23 @@ export function CampaignsManager({ initialCampaigns, organizations, users }: Cam
                     required
                   />
                   <div className="text-xs text-gray-500 space-y-1">
-                    <p><strong>Placeholders:</strong> [Customer Name], [Make], [Model]</p>
-                    <p><strong>Spintax:</strong> Use {'{option1|option2|option3}'} for random variations</p>
+                    {newCampaign.campaign_type === 'custom' ? (
+                      <>
+                        <p><strong className="text-pink-400">Available Placeholders:</strong></p>
+                        <p>[Customer Name], [Salesperson], [Month], [Make], [Model]</p>
+                        {detectedHeaders.length > 0 && (
+                          <p className="text-pink-400/70">
+                            <strong>Custom:</strong> {detectedHeaders.map(h => `[${h}]`).join(', ')}
+                          </p>
+                        )}
+                        <p><strong>Spintax:</strong> Use {'{option1|option2|option3}'} for random variations</p>
+                      </>
+                    ) : (
+                      <>
+                        <p><strong>Placeholders:</strong> [Customer Name], [Make], [Model]</p>
+                        <p><strong>Spintax:</strong> Use {'{option1|option2|option3}'} for random variations</p>
+                      </>
+                    )}
                   </div>
                 </div>
 
@@ -894,6 +1090,12 @@ export function CampaignsManager({ initialCampaigns, organizations, users }: Cam
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
+                    {campaign.campaign_type === 'custom' && (
+                      <Badge className="bg-pink-500/10 text-pink-400 border-pink-500/20">
+                        <Sparkles className="w-3 h-3 mr-1" />
+                        Custom
+                      </Badge>
+                    )}
                     {getStatusBadge(campaign.status)}
                   </div>
                 </CardHeader>

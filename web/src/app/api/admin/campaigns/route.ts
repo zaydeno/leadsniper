@@ -58,7 +58,14 @@ function parseSpintax(template: string): string {
 // Replace placeholders with actual values (square bracket format)
 function replacePlaceholders(
   message: string,
-  lead: { name?: string; make?: string; model?: string },
+  lead: { 
+    name?: string; 
+    make?: string; 
+    model?: string;
+    salesperson?: string;
+    month?: string;
+    custom_fields?: Record<string, string> | null;
+  },
   vehicleMode: 'make' | 'model',
   useCustomerName: boolean = true
 ): string {
@@ -69,6 +76,18 @@ function replacePlaceholders(
   result = result.replace(/\[Customer Name\]/gi, useCustomerName ? (lead.name || 'there') : 'there');
   result = result.replace(/\[Make\]/gi, lead.make || '');
   result = result.replace(/\[Model\]/gi, lead.model || '');
+  // Custom campaign fields
+  result = result.replace(/\[Salesperson\]/gi, lead.salesperson || '');
+  result = result.replace(/\[Month\]/gi, lead.month || '');
+  
+  // Replace any custom fields
+  if (lead.custom_fields) {
+    for (const [key, value] of Object.entries(lead.custom_fields)) {
+      const regex = new RegExp(`\\[${key}\\]`, 'gi');
+      result = result.replace(regex, value || '');
+    }
+  }
+  
   return result;
 }
 
@@ -99,6 +118,7 @@ export async function POST(request: NextRequest) {
     const {
       name,
       organization_id,
+      campaign_type,
       message_template,
       vehicle_reference_mode,
       assignment_mode,
@@ -133,6 +153,7 @@ export async function POST(request: NextRequest) {
       .insert({
         name,
         organization_id,
+        campaign_type: campaign_type || 'normal',
         message_template,
         vehicle_reference_mode: vehicle_reference_mode || 'model',
         assignment_mode: assignment_mode || 'single_user',
@@ -159,6 +180,9 @@ export async function POST(request: NextRequest) {
       make?: string;
       model?: string;
       kijiji_link?: string;
+      salesperson?: string;
+      month?: string;
+      custom_fields?: Record<string, string>;
     }, index: number) => {
       let assignedUserId = assigned_to;
       
@@ -174,6 +198,9 @@ export async function POST(request: NextRequest) {
         make: lead.make || null,
         model: lead.model || null,
         kijiji_link: lead.kijiji_link || null,
+        salesperson: lead.salesperson || null,
+        month: lead.month || null,
+        custom_fields: lead.custom_fields || null,
         assigned_to: assignedUserId,
         lead_order: index,
         status: 'pending',
@@ -274,6 +301,9 @@ async function processOneLead(
     make?: string;
     model?: string;
     kijiji_link?: string;
+    salesperson?: string;
+    month?: string;
+    custom_fields?: Record<string, string> | null;
     assigned_to?: string;
     lead_order: number;
   },
@@ -303,7 +333,14 @@ async function processOneLead(
     const parsedMessage = parseSpintax(campaign.message_template);
     const finalMessage = replacePlaceholders(
       parsedMessage,
-      { name: lead.name, make: lead.make, model: lead.model },
+      { 
+        name: lead.name, 
+        make: lead.make, 
+        model: lead.model,
+        salesperson: lead.salesperson,
+        month: lead.month,
+        custom_fields: lead.custom_fields,
+      },
       campaign.vehicle_reference_mode,
       campaign.use_customer_name
     );
