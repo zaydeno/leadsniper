@@ -57,18 +57,18 @@ interface CampaignsManagerProps {
 
 interface CSVLead {
   phone_number: string;
-  name: string;
-  make: string;
-  model: string;
-  kijiji_link: string;
-  is_duplicate?: boolean;
+  name?: string;
+  make?: string;
+  model?: string;
+  kijiji_link?: string;
+  // Custom fields for custom campaigns
+  salesperson?: string;
+  month?: string;
+  // Allow any additional custom fields
+  [key: string]: string | undefined;
 }
 
-interface DuplicateInfo {
-  phone_number: string;
-  existing_thread_id: string;
-  existing_contact_name: string | null;
-}
+type CampaignType = 'normal' | 'custom';
 
 interface CampaignLog {
   id: string;
@@ -94,19 +94,46 @@ function parseSpintax(template: string): string {
 }
 
 // Function to replace placeholders with actual values (uses square brackets)
+// Supports custom placeholders for custom campaigns
 function replacePlaceholders(
   message: string, 
   lead: CSVLead, 
   vehicleMode: 'make' | 'model',
-  useCustomerName: boolean = true
+  useCustomerName: boolean = true,
+  isCustomCampaign: boolean = false
 ): string {
   let result = message;
-  // When using customer name: use name or fallback to 'there'
-  // When NOT using customer name: always use 'there'
-  // Note: Template should use greetings like {Hi|Hello} NOT {Hi there|Hello} to avoid duplication
+  
+  // Standard placeholders
   result = result.replace(/\[Customer Name\]/gi, useCustomerName ? (lead.name || 'there') : 'there');
   result = result.replace(/\[Make\]/gi, lead.make || '');
   result = result.replace(/\[Model\]/gi, lead.model || '');
+  
+  // Custom campaign placeholders
+  result = result.replace(/\[Salesperson\]/gi, lead.salesperson || '');
+  result = result.replace(/\[Month\]/gi, lead.month || '');
+  
+  // For fully custom campaigns, also replace any [FieldName] with the lead's custom fields
+  if (isCustomCampaign) {
+    // Replace any remaining [Placeholder] with matching lead fields (case-insensitive)
+    result = result.replace(/\[([^\]]+)\]/g, (match, fieldName) => {
+      const normalizedFieldName = fieldName.toLowerCase().replace(/\s+/g, '_');
+      // Check if lead has this field
+      for (const key of Object.keys(lead)) {
+        if (key.toLowerCase().replace(/\s+/g, '_') === normalizedFieldName) {
+          return lead[key] || '';
+        }
+      }
+      // Also check without underscores
+      for (const key of Object.keys(lead)) {
+        if (key.toLowerCase().replace(/[\s_]+/g, '') === normalizedFieldName.replace(/[\s_]+/g, '')) {
+          return lead[key] || '';
+        }
+      }
+      return match; // Keep original if no match
+    });
+  }
+  
   return result;
 }
 
@@ -118,11 +145,6 @@ export function CampaignsManager({ initialCampaigns, organizations, users }: Cam
   const [csvFileName, setCsvFileName] = useState<string | null>(null);
   const [previewMessage, setPreviewMessage] = useState<string>('');
   const fileInputRef = useRef<HTMLInputElement>(null);
-  
-  // Duplicate detection state
-  const [duplicates, setDuplicates] = useState<DuplicateInfo[]>([]);
-  const [isCheckingDuplicates, setIsCheckingDuplicates] = useState(false);
-  const [includeDuplicates, setIncludeDuplicates] = useState(false);
   
   // Log viewer state
   const [expandedLogs, setExpandedLogs] = useState<string | null>(null);
@@ -140,7 +162,12 @@ export function CampaignsManager({ initialCampaigns, organizations, users }: Cam
     assigned_to: '',
     delay_seconds: 65,
     use_customer_name: true,
+    campaign_type: 'normal' as CampaignType,
+    custom_message: '',
   });
+  
+  // Detected CSV headers for custom campaigns
+  const [detectedHeaders, setDetectedHeaders] = useState<string[]>([]);
 
   // Update template when vehicle reference mode changes
   const handleVehicleModeChange = (mode: 'make' | 'model') => {
@@ -230,15 +257,27 @@ export function CampaignsManager({ initialCampaigns, organizations, users }: Cam
 
   // Update preview when template or leads change
   useEffect(() => {
-    if (csvLeads.length > 0 && newCampaign.message_template) {
+    if (csvLeads.length > 0) {
       const sampleLead = csvLeads[0];
-      const parsed = parseSpintax(newCampaign.message_template);
-      const preview = replacePlaceholders(parsed, sampleLead, newCampaign.vehicle_reference_mode, newCampaign.use_customer_name);
-      setPreviewMessage(preview);
+      const templateToUse = newCampaign.campaign_type === 'custom' 
+        ? newCampaign.custom_message 
+        : newCampaign.message_template;
+      
+      if (templateToUse) {
+        const parsed = parseSpintax(templateToUse);
+        const preview = replacePlaceholders(
+          parsed, 
+          sampleLead, 
+          newCampaign.vehicle_reference_mode, 
+          newCampaign.use_customer_name,
+          newCampaign.campaign_type === 'custom'
+        );
+        setPreviewMessage(preview);
+      }
     }
-  }, [newCampaign.message_template, newCampaign.vehicle_reference_mode, newCampaign.use_customer_name, csvLeads]);
+  }, [newCampaign.message_template, newCampaign.custom_message, newCampaign.vehicle_reference_mode, newCampaign.use_customer_name, newCampaign.campaign_type, csvLeads]);
 
-  // Parse CSV file
+  // Parse CSV file (handles both normal and custom campaigns)
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -255,17 +294,48 @@ export function CampaignsManager({ initialCampaigns, organizations, users }: Cam
         return;
       }
 
-      // Parse headers (case-insensitive mapping)
-      const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
+      // Parse headers - keep original case for display, lowercase for mapping
+      const rawHeaders = lines[0].split(',').map(h => h.trim());
+      const headers = rawHeaders.map(h => h.toLowerCase());
       
-      // Map headers to expected fields
+      // Store detected headers for custom campaign UI
+      setDetectedHeaders(rawHeaders);
+      
+      // Map headers to expected fields (flexible matching)
       const headerMap: Record<string, number> = {};
       headers.forEach((h, i) => {
-        if (h.includes('phone')) headerMap.phone_number = i;
-        else if (h === 'name') headerMap.name = i;
-        else if (h === 'make') headerMap.make = i;
-        else if (h === 'model') headerMap.model = i;
-        else if (h.includes('kijiji') || h.includes('link')) headerMap.kijiji_link = i;
+        // Phone number detection (required)
+        if (h.includes('phone') || h === 'tel' || h === 'mobile' || h === 'cell') {
+          headerMap.phone_number = i;
+        }
+        // Customer name detection
+        else if (h === 'name' || h === 'customer name' || h === 'customer_name' || h === 'customername') {
+          headerMap.name = i;
+        }
+        // Salesperson detection
+        else if (h === 'salesperson' || h === 'sales person' || h === 'sales_person' || h === 'rep' || h === 'sales rep') {
+          headerMap.salesperson = i;
+        }
+        // Month detection
+        else if (h === 'month') {
+          headerMap.month = i;
+        }
+        // Make detection
+        else if (h === 'make' || h === 'brand') {
+          headerMap.make = i;
+        }
+        // Model detection
+        else if (h === 'model' || h === 'vehicle' || h === 'vehicle model') {
+          headerMap.model = i;
+        }
+        // Link detection
+        else if (h.includes('kijiji') || h.includes('link') || h.includes('url')) {
+          headerMap.kijiji_link = i;
+        }
+        // Store all other headers as custom fields
+        else {
+          headerMap[h] = i;
+        }
       });
 
       if (headerMap.phone_number === undefined) {
@@ -273,69 +343,63 @@ export function CampaignsManager({ initialCampaigns, organizations, users }: Cam
         return;
       }
 
-      // Parse data rows
+      // Parse data rows - capture all fields
       const leads: CSVLead[] = [];
       for (let i = 1; i < lines.length; i++) {
-        const values = lines[i].split(',').map(v => v.trim());
+        // Handle CSV with quoted values that may contain commas
+        const values = parseCSVLine(lines[i]);
         if (values[headerMap.phone_number]) {
-          leads.push({
+          const lead: CSVLead = {
             phone_number: values[headerMap.phone_number] || '',
-            name: headerMap.name !== undefined ? values[headerMap.name] || '' : '',
-            make: headerMap.make !== undefined ? values[headerMap.make] || '' : '',
-            model: headerMap.model !== undefined ? values[headerMap.model] || '' : '',
-            kijiji_link: headerMap.kijiji_link !== undefined ? values[headerMap.kijiji_link] || '' : '',
+          };
+          
+          // Map standard fields
+          if (headerMap.name !== undefined) lead.name = values[headerMap.name] || '';
+          if (headerMap.salesperson !== undefined) lead.salesperson = values[headerMap.salesperson] || '';
+          if (headerMap.month !== undefined) lead.month = values[headerMap.month] || '';
+          if (headerMap.make !== undefined) lead.make = values[headerMap.make] || '';
+          if (headerMap.model !== undefined) lead.model = values[headerMap.model] || '';
+          if (headerMap.kijiji_link !== undefined) lead.kijiji_link = values[headerMap.kijiji_link] || '';
+          
+          // Map all other custom fields using original header names
+          Object.keys(headerMap).forEach((key) => {
+            if (!['phone_number', 'name', 'salesperson', 'month', 'make', 'model', 'kijiji_link'].includes(key)) {
+              lead[key] = values[headerMap[key]] || '';
+            }
           });
+          
+          leads.push(lead);
         }
       }
 
       setCsvLeads(leads);
-      setIncludeDuplicates(false); // Reset override when new CSV is uploaded
       toast.success(`Loaded ${leads.length} leads from CSV`);
-      
-      // Check for duplicates
-      checkDuplicates(leads);
     };
 
     reader.readAsText(file);
   };
-
-  // Check for duplicate phone numbers against existing threads
-  const checkDuplicates = async (leads: CSVLead[]) => {
-    if (leads.length === 0) return;
+  
+  // Helper to parse CSV line handling quoted values
+  const parseCSVLine = (line: string): string[] => {
+    const result: string[] = [];
+    let current = '';
+    let inQuotes = false;
     
-    setIsCheckingDuplicates(true);
-    setDuplicates([]);
-    
-    try {
-      const response = await fetch('/api/admin/campaigns/check-duplicates', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          phone_numbers: leads.map(l => l.phone_number),
-        }),
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        setDuplicates(data.duplicates || []);
-        
-        // Mark duplicates in the leads array
-        const duplicatePhones = new Set(data.duplicates.map((d: DuplicateInfo) => d.phone_number));
-        const updatedLeads = leads.map(lead => ({
-          ...lead,
-          is_duplicate: duplicatePhones.has(lead.phone_number),
-        }));
-        setCsvLeads(updatedLeads);
-        
-        if (data.duplicates_found > 0) {
-          toast.warning(`Found ${data.duplicates_found} duplicate phone number(s) already in the system`);
-        }
+    for (let i = 0; i < line.length; i++) {
+      const char = line[i];
+      
+      if (char === '"') {
+        inQuotes = !inQuotes;
+      } else if (char === ',' && !inQuotes) {
+        result.push(current.trim());
+        current = '';
+      } else {
+        current += char;
       }
-    } catch (error) {
-      console.error('Error checking duplicates:', error);
-    } finally {
-      setIsCheckingDuplicates(false);
     }
+    result.push(current.trim());
+    
+    return result;
   };
 
   // Create campaign
@@ -356,28 +420,29 @@ export function CampaignsManager({ initialCampaigns, organizations, users }: Cam
       toast.error('Please select a user to assign leads to');
       return;
     }
+    
+    // Validate custom campaign has a message
+    if (newCampaign.campaign_type === 'custom' && !newCampaign.custom_message.trim()) {
+      toast.error('Please enter a custom message template');
+      return;
+    }
 
     setIsCreating(true);
 
     try {
-      // Filter out duplicates if not including them
-      const leadsToSend = includeDuplicates 
-        ? csvLeads 
-        : csvLeads.filter(l => !l.is_duplicate);
+      // Determine which message template to use
+      const messageTemplate = newCampaign.campaign_type === 'custom' 
+        ? newCampaign.custom_message 
+        : newCampaign.message_template;
       
-      if (leadsToSend.length === 0) {
-        toast.error('No leads to send - all are duplicates');
-        setIsCreating(false);
-        return;
-      }
-
       // Create campaign via API
       const response = await fetch('/api/admin/campaigns', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           ...newCampaign,
-          leads: leadsToSend,
+          message_template: messageTemplate,
+          leads: csvLeads,
         }),
       });
 
@@ -451,12 +516,13 @@ export function CampaignsManager({ initialCampaigns, organizations, users }: Cam
       assigned_to: '',
       delay_seconds: 65,
       use_customer_name: true,
+      campaign_type: 'normal',
+      custom_message: '',
     });
     setCsvLeads([]);
     setCsvFileName(null);
     setPreviewMessage('');
-    setDuplicates([]);
-    setIncludeDuplicates(false);
+    setDetectedHeaders([]);
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
@@ -508,6 +574,39 @@ export function CampaignsManager({ initialCampaigns, organizations, users }: Cam
               </DialogHeader>
               
               <form onSubmit={handleCreateCampaign} className="space-y-6 mt-4">
+                {/* Campaign Type Toggle */}
+                <div className="space-y-2">
+                  <Label className="text-gray-400">Campaign Type</Label>
+                  <div className="grid grid-cols-2 gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setNewCampaign({ ...newCampaign, campaign_type: 'normal' })}
+                      className={`p-3 rounded-xl border transition-all ${
+                        newCampaign.campaign_type === 'normal'
+                          ? 'border-purple-500 bg-purple-500/10'
+                          : 'border-gray-800 hover:border-gray-700'
+                      }`}
+                    >
+                      <FileText className="w-5 h-5 mx-auto mb-1 text-purple-400" />
+                      <p className="text-sm text-white">Normal Campaign</p>
+                      <p className="text-xs text-gray-500">Pre-built templates</p>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setNewCampaign({ ...newCampaign, campaign_type: 'custom' })}
+                      className={`p-3 rounded-xl border transition-all ${
+                        newCampaign.campaign_type === 'custom'
+                          ? 'border-purple-500 bg-purple-500/10'
+                          : 'border-gray-800 hover:border-gray-700'
+                      }`}
+                    >
+                      <Terminal className="w-5 h-5 mx-auto mb-1 text-purple-400" />
+                      <p className="text-sm text-white">Custom Campaign</p>
+                      <p className="text-xs text-gray-500">Your own message + CSV</p>
+                    </button>
+                  </div>
+                </div>
+
                 {/* Campaign Name */}
                 <div className="space-y-2">
                   <Label className="text-gray-400">Campaign Name</Label>
@@ -576,81 +675,41 @@ export function CampaignsManager({ initialCampaigns, organizations, users }: Cam
                       <>
                         <Upload className="w-8 h-8 text-gray-500 mx-auto mb-2" />
                         <p className="text-sm text-gray-500">Click to upload CSV file</p>
-                        <p className="text-xs text-gray-600 mt-1">Headers: Phone number, Name, Make, Model, Kijiji Link</p>
+                        <p className="text-xs text-gray-600 mt-1">
+                          {newCampaign.campaign_type === 'custom' 
+                            ? 'Required: Phone number column. All other columns become variables.'
+                            : 'Headers: Phone number, Name, Make, Model, Kijiji Link'}
+                        </p>
                       </>
                     )}
                   </div>
+                  
+                  {/* Show detected headers for custom campaigns */}
+                  {newCampaign.campaign_type === 'custom' && detectedHeaders.length > 0 && (
+                    <div className="p-3 bg-[#1a1a24] border border-gray-800 rounded-xl">
+                      <p className="text-xs text-gray-400 mb-2">Detected columns (use as placeholders):</p>
+                      <div className="flex flex-wrap gap-2">
+                        {detectedHeaders.map((header, idx) => (
+                          <Badge 
+                            key={idx} 
+                            className="bg-purple-500/10 text-purple-400 border-purple-500/20 cursor-pointer hover:bg-purple-500/20"
+                            onClick={() => {
+                              // Add placeholder to custom message
+                              const placeholder = `[${header}]`;
+                              setNewCampaign({ 
+                                ...newCampaign, 
+                                custom_message: newCampaign.custom_message + placeholder 
+                              });
+                            }}
+                          >
+                            [{header}]
+                          </Badge>
+                        ))}
+                      </div>
+                      <p className="text-xs text-gray-600 mt-2">Click to insert into message</p>
+                    </div>
+                  )}
                 </div>
-
-                {/* Duplicate Detection Warning */}
-                {csvLeads.length > 0 && (
-                  <div className="space-y-3">
-                    {isCheckingDuplicates ? (
-                      <div className="flex items-center gap-2 text-gray-400 text-sm">
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                        Checking for duplicates...
-                      </div>
-                    ) : duplicates.length > 0 ? (
-                      <div className="p-4 rounded-xl border border-amber-500/30 bg-amber-500/10">
-                        <div className="flex items-start gap-3">
-                          <AlertCircle className="w-5 h-5 text-amber-400 flex-shrink-0 mt-0.5" />
-                          <div className="flex-1">
-                            <p className="text-amber-400 font-medium">
-                              {duplicates.length} duplicate{duplicates.length > 1 ? 's' : ''} found
-                            </p>
-                            <p className="text-sm text-amber-400/80 mt-1">
-                              {duplicates.length} phone number{duplicates.length > 1 ? 's' : ''} already exist in the inbox
-                            </p>
-                            
-                            {/* Show duplicate details (max 5) */}
-                            <div className="mt-2 space-y-1">
-                              {duplicates.slice(0, 5).map((dup, i) => (
-                                <p key={i} className="text-xs text-amber-400/60">
-                                  • {dup.phone_number} {dup.existing_contact_name && `(${dup.existing_contact_name})`}
-                                </p>
-                              ))}
-                              {duplicates.length > 5 && (
-                                <p className="text-xs text-amber-400/60">
-                                  ...and {duplicates.length - 5} more
-                                </p>
-                              )}
-                            </div>
-
-                            {/* Override Toggle */}
-                            <div className="mt-3 flex items-center gap-3">
-                              <button
-                                type="button"
-                                onClick={() => setIncludeDuplicates(!includeDuplicates)}
-                                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                                  includeDuplicates ? 'bg-amber-500' : 'bg-gray-700'
-                                }`}
-                              >
-                                <span
-                                  className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                                    includeDuplicates ? 'translate-x-6' : 'translate-x-1'
-                                  }`}
-                                />
-                              </button>
-                              <span className="text-sm text-amber-400/80">
-                                {includeDuplicates ? 'Including duplicates' : 'Skipping duplicates'}
-                              </span>
-                            </div>
-
-                            {/* Lead count summary */}
-                            <p className="text-xs text-gray-500 mt-2">
-                              Will send to: {includeDuplicates ? csvLeads.length : csvLeads.length - duplicates.length} leads
-                            </p>
-                          </div>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="flex items-center gap-2 text-emerald-400 text-sm">
-                        <CheckCircle className="w-4 h-4" />
-                        No duplicates found - all leads are new
-                      </div>
-                    )}
-                  </div>
-                )}
 
                 {/* Assignment Mode */}
                 <div className="space-y-2">
@@ -724,38 +783,40 @@ export function CampaignsManager({ initialCampaigns, organizations, users }: Cam
                   </div>
                 )}
 
-                {/* Vehicle Reference Mode */}
-                <div className="space-y-2">
-                  <Label className="text-gray-400">Vehicle Reference in Message</Label>
-                  <div className="grid grid-cols-2 gap-3">
-                    <button
-                      type="button"
-                      onClick={() => handleVehicleModeChange('model')}
-                      className={`p-3 rounded-xl border transition-all ${
-                        newCampaign.vehicle_reference_mode === 'model'
-                          ? 'border-purple-500 bg-purple-500/10'
-                          : 'border-gray-800 hover:border-gray-700'
-                      }`}
-                    >
-                      <Car className="w-5 h-5 mx-auto mb-1 text-purple-400" />
-                      <p className="text-sm text-white">Use Model</p>
-                      <p className="text-xs text-gray-500">e.g. "2023 Dodge Charger"</p>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleVehicleModeChange('make')}
-                      className={`p-3 rounded-xl border transition-all ${
-                        newCampaign.vehicle_reference_mode === 'make'
-                          ? 'border-purple-500 bg-purple-500/10'
-                          : 'border-gray-800 hover:border-gray-700'
-                      }`}
-                    >
-                      <Car className="w-5 h-5 mx-auto mb-1 text-purple-400" />
-                      <p className="text-sm text-white">Use Make</p>
-                      <p className="text-xs text-gray-500">e.g. "Dodge"</p>
-                    </button>
+                {/* Vehicle Reference Mode - Only for normal campaigns */}
+                {newCampaign.campaign_type === 'normal' && (
+                  <div className="space-y-2">
+                    <Label className="text-gray-400">Vehicle Reference in Message</Label>
+                    <div className="grid grid-cols-2 gap-3">
+                      <button
+                        type="button"
+                        onClick={() => handleVehicleModeChange('model')}
+                        className={`p-3 rounded-xl border transition-all ${
+                          newCampaign.vehicle_reference_mode === 'model'
+                            ? 'border-purple-500 bg-purple-500/10'
+                            : 'border-gray-800 hover:border-gray-700'
+                        }`}
+                      >
+                        <Car className="w-5 h-5 mx-auto mb-1 text-purple-400" />
+                        <p className="text-sm text-white">Use Model</p>
+                        <p className="text-xs text-gray-500">e.g. "2023 Dodge Charger"</p>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleVehicleModeChange('make')}
+                        className={`p-3 rounded-xl border transition-all ${
+                          newCampaign.vehicle_reference_mode === 'make'
+                            ? 'border-purple-500 bg-purple-500/10'
+                            : 'border-gray-800 hover:border-gray-700'
+                        }`}
+                      >
+                        <Car className="w-5 h-5 mx-auto mb-1 text-purple-400" />
+                        <p className="text-sm text-white">Use Make</p>
+                        <p className="text-xs text-gray-500">e.g. "Dodge"</p>
+                      </button>
+                    </div>
                   </div>
-                </div>
+                )}
 
                 {/* Customer Name Toggle */}
                 <div className="space-y-2">
@@ -783,29 +844,55 @@ export function CampaignsManager({ initialCampaigns, organizations, users }: Cam
                         </p>
                         <p className="text-xs text-gray-500">
                           {newCampaign.use_customer_name 
-                            ? 'e.g. "Hey Brett,"' 
-                            : 'e.g. "Hey there,"'}
+                            ? '[Customer Name] → "Brett"' 
+                            : '[Customer Name] → "there"'}
                         </p>
                       </div>
                     </div>
                   </button>
                 </div>
 
-                {/* Message Template */}
-                <div className="space-y-2">
-                  <Label className="text-gray-400">Message Template (Spintax)</Label>
-                  <textarea
-                    value={newCampaign.message_template}
-                    onChange={(e) => setNewCampaign({ ...newCampaign, message_template: e.target.value })}
-                    placeholder="Enter your message with spintax..."
-                    className="w-full h-32 px-4 py-3 bg-[#1a1a24] border border-gray-800 rounded-xl text-white placeholder:text-gray-600 resize-none focus:outline-none focus:border-purple-500/50"
-                    required
-                  />
-                  <div className="text-xs text-gray-500 space-y-1">
-                    <p><strong>Placeholders:</strong> [Customer Name], [Make], [Model]</p>
-                    <p><strong>Spintax:</strong> Use {'{option1|option2|option3}'} for random variations</p>
+                {/* Message Template - Different UI for normal vs custom */}
+                {newCampaign.campaign_type === 'normal' ? (
+                  <div className="space-y-2">
+                    <Label className="text-gray-400">Message Template (Spintax)</Label>
+                    <textarea
+                      value={newCampaign.message_template}
+                      onChange={(e) => setNewCampaign({ ...newCampaign, message_template: e.target.value })}
+                      placeholder="Enter your message with spintax..."
+                      className="w-full h-32 px-4 py-3 bg-[#1a1a24] border border-gray-800 rounded-xl text-white placeholder:text-gray-600 resize-none focus:outline-none focus:border-purple-500/50"
+                      required
+                    />
+                    <div className="text-xs text-gray-500 space-y-1">
+                      <p><strong>Placeholders:</strong> [Customer Name], [Make], [Model]</p>
+                      <p><strong>Spintax:</strong> Use {'{option1|option2|option3}'} for random variations</p>
+                    </div>
                   </div>
-                </div>
+                ) : (
+                  <div className="space-y-2">
+                    <Label className="text-gray-400">Custom Message Template</Label>
+                    <textarea
+                      value={newCampaign.custom_message}
+                      onChange={(e) => setNewCampaign({ ...newCampaign, custom_message: e.target.value })}
+                      placeholder="Enter your custom message with placeholders from your CSV..."
+                      className="w-full h-40 px-4 py-3 bg-[#1a1a24] border border-gray-800 rounded-xl text-white placeholder:text-gray-600 resize-none focus:outline-none focus:border-purple-500/50 font-mono text-sm"
+                      required
+                    />
+                    <div className="text-xs text-gray-500 space-y-1">
+                      <p><strong>Standard Placeholders:</strong> [Customer Name], [Salesperson], [Month], [Make], [Model]</p>
+                      <p><strong>Custom Placeholders:</strong> Use any column name from your CSV as [Column Name]</p>
+                      <p><strong>Spintax:</strong> Use {'{option1|option2|option3}'} for random variations</p>
+                    </div>
+                    
+                    {/* Example template for custom campaigns */}
+                    <div className="p-3 bg-blue-500/10 border border-blue-500/20 rounded-lg mt-2">
+                      <p className="text-xs text-blue-400 font-medium mb-1">Example Template:</p>
+                      <p className="text-xs text-gray-400 font-mono">
+                        {'{Hi|Hello}'} [Customer Name]! This is [Salesperson] from the dealership. Your [Month] service is due for your [Make] [Model]. {'{Would you like to schedule?|Can we book you in?}'}
+                      </p>
+                    </div>
+                  </div>
+                )}
 
                 {/* Preview */}
                 {previewMessage && (
