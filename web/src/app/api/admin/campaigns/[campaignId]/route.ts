@@ -29,43 +29,19 @@ function parseSpintax(template: string): string {
 }
 
 // Replace placeholders with actual values (square bracket format)
-// Supports both standard placeholders and custom fields from CSV
 function replacePlaceholders(
   message: string,
-  lead: Record<string, string | null | undefined>,
+  lead: { name?: string; make?: string; model?: string },
   vehicleMode: 'make' | 'model',
-  useCustomerName: boolean = true,
-  isCustomCampaign: boolean = false
+  useCustomerName: boolean = true
 ): string {
   let result = message;
-  
-  // Standard placeholders
+  // When using customer name: use name or fallback to 'there'
+  // When NOT using customer name: always use 'there'
+  // Note: Template should use greetings like {Hi|Hello} NOT {Hi there|Hello} to avoid duplication
   result = result.replace(/\[Customer Name\]/gi, useCustomerName ? (lead.name || 'there') : 'there');
   result = result.replace(/\[Make\]/gi, lead.make || '');
   result = result.replace(/\[Model\]/gi, lead.model || '');
-  result = result.replace(/\[Salesperson\]/gi, lead.salesperson || '');
-  result = result.replace(/\[Month\]/gi, lead.month || '');
-  
-  // For custom campaigns, replace any remaining [Placeholder] with matching lead fields
-  if (isCustomCampaign) {
-    result = result.replace(/\[([^\]]+)\]/g, (match, fieldName) => {
-      const normalizedFieldName = fieldName.toLowerCase().replace(/\s+/g, '_');
-      // Check if lead has this field (case-insensitive)
-      for (const key of Object.keys(lead)) {
-        if (key.toLowerCase().replace(/\s+/g, '_') === normalizedFieldName) {
-          return lead[key] || '';
-        }
-      }
-      // Also check without underscores
-      for (const key of Object.keys(lead)) {
-        if (key.toLowerCase().replace(/[\s_]+/g, '') === normalizedFieldName.replace(/[\s_]+/g, '')) {
-          return lead[key] || '';
-        }
-      }
-      return ''; // Remove unmatched placeholders
-    });
-  }
-  
   return result;
 }
 
@@ -291,6 +267,232 @@ export async function GET(
   }
 }
 
+// Helper to fetch with timeout
+async function fetchWithTimeout(url: string, options: RequestInit, timeoutMs: number = 30000): Promise<Response> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  
+  try {
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal,
+    });
+    return response;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+// Process a single lead - returns result of processing
+async function processOneLead(
+  adminClient: ReturnType<typeof createAdminClient>,
+  campaignId: string,
+  campaign: {
+    name: string;
+    message_template: string;
+    vehicle_reference_mode: 'make' | 'model';
+    use_customer_name: boolean;
+    sent_count: number;
+    failed_count: number;
+  },
+  org: {
+    id: string;
+    httpsms_api_key: string;
+    httpsms_from_number: string;
+  },
+  lead: {
+    id: string;
+    name?: string;
+    phone_number: string;
+    make?: string;
+    model?: string;
+    kijiji_link?: string;
+    assigned_to?: string;
+    lead_order: number;
+  },
+  leadIndex: number,
+  totalLeads: number,
+  fromNumber: string
+): Promise<{ success: boolean; shouldContinue: boolean; sentCount: number; failedCount: number }> {
+  let currentSentCount = campaign.sent_count;
+  let currentFailedCount = campaign.failed_count;
+
+  await addLog(adminClient, campaignId, 'info', `Processing lead ${leadIndex + 1}/${totalLeads}: ${lead.name || lead.phone_number}`, { phone: lead.phone_number });
+
+  // Check if campaign is still running
+  const { data: currentCampaign } = await adminClient
+    .from('campaigns')
+    .select('status')
+    .eq('id', campaignId)
+    .single();
+
+  if (!currentCampaign || currentCampaign.status !== 'running') {
+    await addLog(adminClient, campaignId, 'warning', 'Campaign paused or cancelled, stopping processing');
+    return { success: false, shouldContinue: false, sentCount: currentSentCount, failedCount: currentFailedCount };
+  }
+
+  try {
+    // Generate message with spintax and placeholders
+    const parsedMessage = parseSpintax(campaign.message_template);
+    const finalMessage = replacePlaceholders(
+      parsedMessage,
+      { name: lead.name, make: lead.make, model: lead.model },
+      campaign.vehicle_reference_mode,
+      campaign.use_customer_name
+    );
+
+    await addLog(adminClient, campaignId, 'info', `Sending SMS to ${lead.phone_number}`, { message_preview: finalMessage.substring(0, 100) + '...' });
+
+    // Send SMS with timeout
+    const httpsmsResponse = await fetchWithTimeout('https://api.httpsms.com/v1/messages/send', {
+      method: 'POST',
+      headers: {
+        'x-api-key': org.httpsms_api_key,
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        content: finalMessage,
+        from: fromNumber,
+        to: lead.phone_number,
+      }),
+    }, 30000);
+
+    const httpsmsData = await httpsmsResponse.json();
+    
+    await addLog(adminClient, campaignId, 'info', `httpSMS API response`, { status: httpsmsData.status, response_ok: httpsmsResponse.ok });
+
+    if (httpsmsResponse.ok && httpsmsData.status === 'success') {
+      // Create thread with metadata
+      const threadId = lead.phone_number;
+      
+      // Check if thread exists
+      const { data: existingThread } = await adminClient
+        .from('threads')
+        .select('id')
+        .eq('id', threadId)
+        .single();
+
+      const threadMetadata = {
+        seller_name: lead.name,
+        vehicle_model: lead.model,
+        vehicle_make: lead.make,
+        listing_url: lead.kijiji_link,
+        source: 'campaign',
+        campaign_id: campaignId,
+        campaign_name: campaign.name,
+        initiated_at: new Date().toISOString(),
+      };
+
+      if (!existingThread) {
+        await adminClient.from('threads').insert({
+          id: threadId,
+          contact_phone: lead.phone_number,
+          contact_name: lead.name,
+          last_message_at: new Date().toISOString(),
+          last_message_preview: finalMessage.substring(0, 100),
+          unread_count: 0,
+          organization_id: org.id,
+          assigned_to: lead.assigned_to,
+          metadata: threadMetadata,
+        });
+      } else {
+        await adminClient
+          .from('threads')
+          .update({
+            last_message_at: new Date().toISOString(),
+            last_message_preview: finalMessage.substring(0, 100),
+            metadata: threadMetadata,
+          })
+          .eq('id', threadId);
+      }
+
+      // Create message record
+      await adminClient.from('messages').insert({
+        thread_id: threadId,
+        content: finalMessage,
+        direction: 'outbound',
+        from_number: fromNumber,
+        to_number: lead.phone_number,
+        status: 'pending',
+        httpsms_id: httpsmsData.data?.id,
+        assigned_to: lead.assigned_to,
+        organization_id: org.id,
+        metadata: {
+          is_campaign_message: true,
+          campaign_id: campaignId,
+          campaign_name: campaign.name,
+          is_initial_outreach: true,
+        },
+      });
+
+      await addLog(adminClient, campaignId, 'success', `✓ SMS sent successfully to ${lead.name || lead.phone_number}`, { httpsms_id: httpsmsData.data?.id });
+
+      // Update lead status
+      await adminClient
+        .from('campaign_leads')
+        .update({ status: 'sent', sent_at: new Date().toISOString() })
+        .eq('id', lead.id);
+
+      currentSentCount += 1;
+
+      // Update campaign progress
+      await adminClient
+        .from('campaigns')
+        .update({ 
+          sent_count: currentSentCount,
+          current_lead_index: lead.lead_order + 1,
+        })
+        .eq('id', campaignId);
+
+      return { success: true, shouldContinue: true, sentCount: currentSentCount, failedCount: currentFailedCount };
+
+    } else {
+      const errorMsg = httpsmsData.message || 'SMS send failed';
+      await addLog(adminClient, campaignId, 'error', `✗ Failed to send to ${lead.phone_number}: ${errorMsg}`, { response: httpsmsData });
+      
+      // Mark as failed
+      await adminClient
+        .from('campaign_leads')
+        .update({ 
+          status: 'failed', 
+          error_message: errorMsg 
+        })
+        .eq('id', lead.id);
+
+      currentFailedCount += 1;
+
+      await adminClient
+        .from('campaigns')
+        .update({ failed_count: currentFailedCount })
+        .eq('id', campaignId);
+
+      return { success: false, shouldContinue: true, sentCount: currentSentCount, failedCount: currentFailedCount };
+    }
+
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+    await addLog(adminClient, campaignId, 'error', `✗ Exception while processing lead: ${errorMsg}`, { phone: lead.phone_number, error: String(error) });
+    
+    await adminClient
+      .from('campaign_leads')
+      .update({ 
+        status: 'failed', 
+        error_message: errorMsg 
+      })
+      .eq('id', lead.id);
+
+    currentFailedCount += 1;
+
+    await adminClient
+      .from('campaigns')
+      .update({ failed_count: currentFailedCount })
+      .eq('id', campaignId);
+
+    return { success: false, shouldContinue: true, sentCount: currentSentCount, failedCount: currentFailedCount };
+  }
+}
+
 // Resume campaign processing
 async function resumeCampaign(campaignId: string) {
   const adminClient = createAdminClient();
@@ -355,219 +557,50 @@ async function resumeCampaign(campaignId: string) {
   for (let i = 0; i < leads.length; i++) {
     const lead = leads[i];
     
-    try {
-      await addLog(adminClient, campaignId, 'info', `Processing lead ${i + 1}/${leads.length}: ${lead.name || lead.phone_number}`);
-      
-      // Check if campaign is still running
-      const { data: currentCampaign } = await adminClient
-        .from('campaigns')
-        .select('status')
-        .eq('id', campaignId)
-        .single();
+    const result = await processOneLead(
+      adminClient,
+      campaignId,
+      { ...campaign, sent_count: currentSentCount, failed_count: currentFailedCount },
+      org,
+      lead,
+      i,
+      leads.length,
+      fromNumber
+    );
 
-      if (!currentCampaign || currentCampaign.status !== 'running') {
-        await addLog(adminClient, campaignId, 'warning', 'Campaign paused or cancelled, stopping processing');
-        break;
-      }
+    currentSentCount = result.sentCount;
+    currentFailedCount = result.failedCount;
 
-      // Generate message with spintax and placeholders
-      const parsedMessage = parseSpintax(campaign.message_template);
-      
-      // Build lead data including custom fields for custom campaigns
-      const leadData: Record<string, string | null | undefined> = {
-        name: lead.name,
-        make: lead.make,
-        model: lead.model,
-        salesperson: lead.salesperson,
-        month: lead.month,
-      };
-      
-      // Merge custom fields if present
-      if (lead.custom_fields && typeof lead.custom_fields === 'object') {
-        Object.assign(leadData, lead.custom_fields);
-      }
-      
-      const finalMessage = replacePlaceholders(
-        parsedMessage,
-        leadData,
-        campaign.vehicle_reference_mode,
-        campaign.use_customer_name,
-        campaign.campaign_type === 'custom'
-      );
-
-      await addLog(adminClient, campaignId, 'info', `Sending SMS to ${lead.phone_number}`, { message_preview: finalMessage.substring(0, 100) + '...' });
-
-      // Send SMS with timeout
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
-      
-      let httpsmsResponse;
-      let httpsmsData;
-      
-      try {
-        httpsmsResponse = await fetch('https://api.httpsms.com/v1/messages/send', {
-          method: 'POST',
-          headers: {
-            'x-api-key': org.httpsms_api_key,
-            'Accept': 'application/json',
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            content: finalMessage,
-            from: fromNumber,
-            to: lead.phone_number,
-          }),
-          signal: controller.signal,
-        });
-
-        httpsmsData = await httpsmsResponse.json();
-        clearTimeout(timeoutId);
-      } catch (fetchError) {
-        clearTimeout(timeoutId);
-        if (fetchError instanceof Error && fetchError.name === 'AbortError') {
-          throw new Error('SMS send request timed out after 30 seconds');
-        }
-        throw fetchError;
-      }
-      
-      await addLog(adminClient, campaignId, 'info', `httpSMS API response`, { status: httpsmsData.status, response_ok: httpsmsResponse.ok });
-
-      if (httpsmsResponse.ok && httpsmsData.status === 'success') {
-        // Create thread with metadata
-        const threadId = lead.phone_number;
-        
-        const { data: existingThread } = await adminClient
-          .from('threads')
-          .select('id')
-          .eq('id', threadId)
-          .single();
-
-        const threadMetadata = {
-          seller_name: lead.name,
-          vehicle_model: lead.model,
-          vehicle_make: lead.make,
-          listing_url: lead.kijiji_link,
-          source: 'campaign',
-          campaign_id: campaignId,
-          campaign_name: campaign.name,
-          initiated_at: new Date().toISOString(),
-        };
-
-        if (!existingThread) {
-          await adminClient.from('threads').insert({
-            id: threadId,
-            contact_phone: lead.phone_number,
-            contact_name: lead.name,
-            last_message_at: new Date().toISOString(),
-            last_message_preview: finalMessage.substring(0, 100),
-            unread_count: 0,
-            organization_id: org.id,
-            assigned_to: lead.assigned_to,
-            metadata: threadMetadata,
-          });
-        } else {
-          await adminClient
-            .from('threads')
-            .update({
-              last_message_at: new Date().toISOString(),
-              last_message_preview: finalMessage.substring(0, 100),
-              metadata: threadMetadata,
-            })
-            .eq('id', threadId);
-        }
-
-        // Create message record
-        await adminClient.from('messages').insert({
-          thread_id: threadId,
-          content: finalMessage,
-          direction: 'outbound',
-          from_number: fromNumber,
-          to_number: lead.phone_number,
-          status: 'pending',
-          httpsms_id: httpsmsData.data?.id,
-          assigned_to: lead.assigned_to,
-          organization_id: org.id,
-          metadata: {
-            is_campaign_message: true,
-            campaign_id: campaignId,
-            campaign_name: campaign.name,
-            is_initial_outreach: true,
-          },
-        });
-
-        await addLog(adminClient, campaignId, 'success', `✓ SMS sent successfully to ${lead.name || lead.phone_number}`, { httpsms_id: httpsmsData.data?.id });
-
-        // Update lead status
-        await adminClient
-          .from('campaign_leads')
-          .update({ status: 'sent', sent_at: new Date().toISOString() })
-          .eq('id', lead.id);
-
-        currentSentCount += 1;
-        
-        // Update campaign progress
-        await adminClient
-          .from('campaigns')
-          .update({ 
-            sent_count: currentSentCount,
-            current_lead_index: lead.lead_order + 1,
-          })
-          .eq('id', campaignId);
-
-      } else {
-        const errorMsg = httpsmsData.message || 'SMS send failed';
-        await addLog(adminClient, campaignId, 'error', `✗ Failed to send to ${lead.phone_number}: ${errorMsg}`, { response: httpsmsData });
-
-        await adminClient
-          .from('campaign_leads')
-          .update({ 
-            status: 'failed', 
-            error_message: errorMsg 
-          })
-          .eq('id', lead.id);
-
-        currentFailedCount += 1;
-        
-        await adminClient
-          .from('campaigns')
-          .update({ failed_count: currentFailedCount })
-          .eq('id', campaignId);
-      }
-
-    } catch (error) {
-      const errorMsg = error instanceof Error ? error.message : 'Unknown error';
-      try {
-        await addLog(adminClient, campaignId, 'error', `✗ Exception while processing lead: ${errorMsg}`, { phone: lead.phone_number, error: String(error) });
-
-        await adminClient
-          .from('campaign_leads')
-          .update({ 
-            status: 'failed', 
-            error_message: errorMsg 
-          })
-          .eq('id', lead.id);
-
-        currentFailedCount += 1;
-        
-        await adminClient
-          .from('campaigns')
-          .update({ failed_count: currentFailedCount })
-          .eq('id', campaignId);
-      } catch (logError) {
-        console.error('Failed to log error:', logError);
-      }
+    if (!result.shouldContinue) {
+      break;
     }
 
-    // Delay before next message
+    // Delay before next message - break into smaller chunks to check status
     if (i < leads.length - 1) {
-      const delay = campaign.delay_seconds * 1000;
-      try {
-        await addLog(adminClient, campaignId, 'info', `Waiting ${campaign.delay_seconds} seconds before next message...`);
-        await new Promise(resolve => setTimeout(resolve, delay));
-      } catch (delayError) {
-        console.error('Error during delay:', delayError);
-        // Continue anyway
-        await new Promise(resolve => setTimeout(resolve, delay));
+      const totalDelay = campaign.delay_seconds * 1000;
+      const chunkSize = 10000; // 10 second chunks
+      const chunks = Math.ceil(totalDelay / chunkSize);
+      
+      await addLog(adminClient, campaignId, 'info', `Waiting ${campaign.delay_seconds} seconds before next message...`);
+      
+      for (let chunk = 0; chunk < chunks; chunk++) {
+        // Check if campaign is still running during wait
+        const { data: statusCheck } = await adminClient
+          .from('campaigns')
+          .select('status')
+          .eq('id', campaignId)
+          .single();
+        
+        if (!statusCheck || statusCheck.status !== 'running') {
+          await addLog(adminClient, campaignId, 'warning', 'Campaign paused during delay, stopping');
+          // Exit outer loop
+          i = leads.length;
+          break;
+        }
+        
+        const remainingDelay = totalDelay - (chunk * chunkSize);
+        const thisChunkDelay = Math.min(chunkSize, remainingDelay);
+        await new Promise(resolve => setTimeout(resolve, thisChunkDelay));
       }
     }
   }
@@ -590,4 +623,3 @@ async function resumeCampaign(campaignId: string) {
       .eq('id', campaignId);
   }
 }
-

@@ -1,1 +1,617 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { createAdminClient } from '@/lib/supabase/admin';
 
+// =============================================
+// httpSMS Webhook Handler
+// Docs: https://docs.httpsms.com/webhooks/introduction
+// =============================================
+
+// Send SMS notification to a user
+async function sendSmsNotification(
+  apiKey: string,
+  fromNumber: string,
+  toNumber: string,
+  message: string
+) {
+  try {
+    const response = await fetch('https://api.httpsms.com/v1/messages/send', {
+      method: 'POST',
+      headers: {
+        'x-api-key': apiKey,
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        content: message,
+        from: fromNumber,
+        to: toNumber,
+      }),
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      console.error('Failed to send notification SMS:', error);
+      return false;
+    }
+
+    console.log(`📲 Notification sent to ${toNumber}`);
+    return true;
+  } catch (error) {
+    console.error('Error sending notification SMS:', error);
+    return false;
+  }
+}
+
+// Normalize phone number to a consistent format
+function normalizePhoneNumber(phone: string): string {
+  const cleaned = phone.replace(/[^\d+]/g, '');
+  return cleaned.startsWith('+') ? cleaned : `+${cleaned}`;
+}
+
+// Find organization by phone number
+async function findOrganizationByPhone(
+  supabase: ReturnType<typeof createAdminClient>,
+  phoneNumber: string
+) {
+  const normalized = normalizePhoneNumber(phoneNumber);
+  
+  const { data } = await supabase
+    .from('organizations')
+    .select('id, httpsms_api_key, httpsms_from_number, httpsms_webhook_signing_key')
+    .or(`httpsms_from_number.eq.${normalized},httpsms_from_number.eq.${phoneNumber}`)
+    .single();
+
+  return data;
+}
+
+// Verify JWT token from httpSMS (optional but recommended)
+async function verifyWebhookSignature(
+  request: NextRequest,
+  signingKey: string | null
+): Promise<boolean> {
+  if (!signingKey) {
+    // No signing key configured, skip verification
+    return true;
+  }
+
+  const authHeader = request.headers.get('Authorization');
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    console.warn('Missing or invalid Authorization header');
+    return false;
+  }
+
+  // For production, use a proper JWT library like jose
+  // For now, we'll just check the header exists
+  // TODO: Implement full JWT verification with HS256
+  return true;
+}
+
+// Update or create thread for a phone number
+async function upsertThread(
+  supabase: ReturnType<typeof createAdminClient>,
+  threadId: string,
+  contactPhone: string,
+  organizationId: string | null,
+  lastMessage: string,
+  isInbound: boolean
+) {
+  const { data: existing } = await supabase
+    .from('threads')
+    .select('id, unread_count, flag')
+    .eq('id', threadId)
+    .single();
+
+  if (existing) {
+    // Build update object
+    const updateData: Record<string, unknown> = {
+      last_message_at: new Date().toISOString(),
+      last_message_preview: lastMessage.substring(0, 100),
+      unread_count: isInbound ? existing.unread_count + 1 : existing.unread_count,
+      updated_at: new Date().toISOString(),
+    };
+    
+    // Auto-set flag to 'active' when customer responds (inbound message)
+    // Only if current flag is 'no_response' - don't override 'booked' or 'dead'
+    if (isInbound && (existing.flag === 'no_response' || !existing.flag)) {
+      updateData.flag = 'active';
+    }
+
+    await supabase
+      .from('threads')
+      .update(updateData)
+      .eq('id', threadId);
+  } else {
+    await supabase.from('threads').insert({
+      id: threadId,
+      contact_phone: contactPhone,
+      last_message_at: new Date().toISOString(),
+      last_message_preview: lastMessage.substring(0, 100),
+      unread_count: isInbound ? 1 : 0,
+      organization_id: organizationId,
+      // New threads from inbound messages start as 'active', outbound as 'no_response'
+      flag: isInbound ? 'active' : 'no_response',
+    });
+  }
+}
+
+// =============================================
+// WEBHOOK EVENT HANDLERS
+// =============================================
+
+// Handle incoming SMS: message.phone.received
+async function handleMessageReceived(
+  supabase: ReturnType<typeof createAdminClient>,
+  data: Record<string, unknown>
+) {
+  const fromNumber = normalizePhoneNumber(data.contact as string);
+  const toNumber = normalizePhoneNumber(data.owner as string);
+  const threadId = fromNumber;
+  const content = data.content as string;
+
+  // Find organization by the receiving number
+  const org = await findOrganizationByPhone(supabase, toNumber);
+
+  // Insert the message
+  const { error: messageError } = await supabase.from('messages').insert({
+    thread_id: threadId,
+    content: content,
+    direction: 'inbound',
+    from_number: fromNumber,
+    to_number: toNumber,
+    status: 'received',
+    httpsms_id: data.id as string,
+    organization_id: org?.id || null,
+    metadata: {
+      sim: data.sim,
+      timestamp: data.timestamp,
+      encrypted: data.encrypted,
+    },
+  });
+
+  if (messageError) {
+    console.error('Error inserting inbound message:', messageError);
+    throw messageError;
+  }
+
+  // Update thread
+  await upsertThread(supabase, threadId, fromNumber, org?.id || null, content, true);
+
+  console.log(`📥 Inbound SMS from ${fromNumber} to org ${org?.id || 'unknown'}`);
+
+  // =============================================
+  // SEND SMS NOTIFICATIONS
+  // =============================================
+  if (org?.id && org.httpsms_api_key && org.httpsms_from_number) {
+    // Get thread to check if it's assigned to someone
+    const { data: thread } = await supabase
+      .from('threads')
+      .select('assigned_to, contact_name, metadata')
+      .eq('id', threadId)
+      .single();
+
+    // Get contact info for notification
+    const contactName = thread?.contact_name || 
+      thread?.metadata?.seller_name || 
+      formatPhoneForDisplay(fromNumber);
+    const vehicleModel = thread?.metadata?.vehicle_model;
+
+    // Build notification message
+    let notificationMessage = `📩 New message from ${contactName} (${formatPhoneForDisplay(fromNumber)})`;
+    if (vehicleModel) {
+      notificationMessage += ` regarding the ${vehicleModel}`;
+    }
+    notificationMessage += `\n\n"${content.substring(0, 100)}${content.length > 100 ? '...' : ''}"`;
+
+    if (thread?.assigned_to) {
+      // Thread is assigned - notify the assigned user
+      const { data: assignedUser } = await supabase
+        .from('profiles')
+        .select('notification_number, full_name')
+        .eq('id', thread.assigned_to)
+        .single();
+
+      if (assignedUser?.notification_number) {
+        await sendSmsNotification(
+          org.httpsms_api_key,
+          org.httpsms_from_number,
+          assignedUser.notification_number,
+          notificationMessage
+        );
+      }
+    } else {
+      // Thread not assigned - notify all org members with notification numbers
+      const { data: orgMembers } = await supabase
+        .from('profiles')
+        .select('notification_number, full_name')
+        .eq('organization_id', org.id)
+        .not('notification_number', 'is', null);
+
+      if (orgMembers && orgMembers.length > 0) {
+        // Send to all org members with notification numbers
+        for (const member of orgMembers) {
+          if (member.notification_number) {
+            await sendSmsNotification(
+              org.httpsms_api_key,
+              org.httpsms_from_number,
+              member.notification_number,
+              notificationMessage
+            );
+          }
+        }
+      }
+    }
+  }
+
+  return { success: true, type: 'message_received' };
+}
+
+// Format phone number for display in notifications
+function formatPhoneForDisplay(phone: string): string {
+  const cleaned = phone.replace(/\D/g, '');
+  if (cleaned.length === 11 && cleaned.startsWith('1')) {
+    return `(${cleaned.slice(1, 4)}) ${cleaned.slice(4, 7)}-${cleaned.slice(7)}`;
+  }
+  if (cleaned.length === 10) {
+    return `(${cleaned.slice(0, 3)}) ${cleaned.slice(3, 6)}-${cleaned.slice(6)}`;
+  }
+  return phone;
+}
+
+// Handle outbound SMS sent: message.phone.sent
+async function handleMessageSent(
+  supabase: ReturnType<typeof createAdminClient>,
+  data: Record<string, unknown>
+) {
+  const toNumber = normalizePhoneNumber(data.contact as string);
+  const fromNumber = normalizePhoneNumber(data.owner as string);
+  const threadId = toNumber;
+  const content = data.content as string;
+  const httpsmsId = data.id as string;
+
+  // Find organization
+  const org = await findOrganizationByPhone(supabase, fromNumber);
+
+  // Check if message already exists (sent via our app)
+  const { data: existing } = await supabase
+    .from('messages')
+    .select('id')
+    .eq('httpsms_id', httpsmsId)
+    .single();
+
+  if (existing) {
+    // Update existing message status to sent
+    await supabase
+      .from('messages')
+      .update({ status: 'sent', updated_at: new Date().toISOString() })
+      .eq('httpsms_id', httpsmsId);
+  } else {
+    // Message sent externally (not via our app), insert it
+    await supabase.from('messages').insert({
+      thread_id: threadId,
+      content: content,
+      direction: 'outbound',
+      from_number: fromNumber,
+      to_number: toNumber,
+      status: 'sent',
+      httpsms_id: httpsmsId,
+      organization_id: org?.id || null,
+      metadata: {
+        sim: data.sim,
+        timestamp: data.timestamp,
+        source: 'external',
+      },
+    });
+
+    // Update thread
+    await upsertThread(supabase, threadId, toNumber, org?.id || null, content, false);
+  }
+
+  console.log(`📤 Outbound SMS sent to ${toNumber}`);
+  return { success: true, type: 'message_sent' };
+}
+
+// Handle SMS delivered: message.phone.delivered
+async function handleMessageDelivered(
+  supabase: ReturnType<typeof createAdminClient>,
+  data: Record<string, unknown>
+) {
+  const httpsmsId = data.id as string;
+
+  const { error } = await supabase
+    .from('messages')
+    .update({ status: 'delivered', updated_at: new Date().toISOString() })
+    .eq('httpsms_id', httpsmsId);
+
+  if (error) {
+    console.error('Error updating message to delivered:', error);
+  }
+
+  console.log(`✅ SMS delivered: ${httpsmsId}`);
+  return { success: true, type: 'message_delivered' };
+}
+
+// Handle SMS send failed: message.send.failed
+async function handleMessageFailed(
+  supabase: ReturnType<typeof createAdminClient>,
+  data: Record<string, unknown>
+) {
+  const httpsmsId = data.id as string;
+  const reason = data.failure_reason as string;
+
+  // First update the status
+  const { error } = await supabase
+    .from('messages')
+    .update({
+      status: 'failed',
+      updated_at: new Date().toISOString(),
+    })
+    .eq('httpsms_id', httpsmsId);
+
+  if (error) {
+    console.error('Error updating message to failed:', error);
+  }
+
+  // Update metadata with failure reason
+  if (reason) {
+    try {
+      await supabase
+        .from('messages')
+        .update({
+          metadata: { failure_reason: reason },
+        })
+        .eq('httpsms_id', httpsmsId);
+    } catch {
+      // Ignore metadata update errors
+    }
+  }
+
+  console.log(`❌ SMS failed: ${httpsmsId} - ${reason}`);
+  return { success: true, type: 'message_failed' };
+}
+
+// Handle SMS expired: message.send.expired
+async function handleMessageExpired(
+  supabase: ReturnType<typeof createAdminClient>,
+  data: Record<string, unknown>
+) {
+  const httpsmsId = data.id as string;
+
+  const { error } = await supabase
+    .from('messages')
+    .update({ status: 'expired', updated_at: new Date().toISOString() })
+    .eq('httpsms_id', httpsmsId);
+
+  if (error) {
+    console.error('Error updating message to expired:', error);
+  }
+
+  console.log(`⏰ SMS expired: ${httpsmsId}`);
+  return { success: true, type: 'message_expired' };
+}
+
+// Handle missed call: message.call.missed
+async function handleMissedCall(
+  supabase: ReturnType<typeof createAdminClient>,
+  data: Record<string, unknown>
+) {
+  const fromNumber = normalizePhoneNumber(data.contact as string);
+  const toNumber = normalizePhoneNumber(data.owner as string);
+
+  // Find organization
+  const org = await findOrganizationByPhone(supabase, toNumber);
+
+  const { error } = await supabase.from('missed_calls').insert({
+    from_number: fromNumber,
+    to_number: toNumber,
+    organization_id: org?.id || null,
+  });
+
+  if (error) {
+    console.error('Error inserting missed call:', error);
+    throw error;
+  }
+
+  console.log(`📞 Missed call from ${fromNumber}`);
+  return { success: true, type: 'call_missed' };
+}
+
+// Handle phone offline: phone.heartbeat.offline
+async function handlePhoneOffline(
+  supabase: ReturnType<typeof createAdminClient>,
+  data: Record<string, unknown>
+) {
+  const phoneNumber = normalizePhoneNumber(data.owner as string);
+
+  // Find organization
+  const org = await findOrganizationByPhone(supabase, phoneNumber);
+
+  // Upsert phone status
+  const { error } = await supabase.from('phone_status').upsert(
+    {
+      phone_number: phoneNumber,
+      organization_id: org?.id || null,
+      is_online: false,
+      went_offline_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: 'phone_number' }
+  );
+
+  if (error) {
+    console.error('Error updating phone status to offline:', error);
+  }
+
+  console.log(`📴 Phone offline: ${phoneNumber}`);
+  return { success: true, type: 'phone_offline' };
+}
+
+// Handle phone online: phone.heartbeat.online
+async function handlePhoneOnline(
+  supabase: ReturnType<typeof createAdminClient>,
+  data: Record<string, unknown>
+) {
+  const phoneNumber = normalizePhoneNumber(data.owner as string);
+
+  // Find organization
+  const org = await findOrganizationByPhone(supabase, phoneNumber);
+
+  // Upsert phone status
+  const { error } = await supabase.from('phone_status').upsert(
+    {
+      phone_number: phoneNumber,
+      organization_id: org?.id || null,
+      is_online: true,
+      last_heartbeat_at: new Date().toISOString(),
+      went_offline_at: null,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: 'phone_number' }
+  );
+
+  if (error) {
+    console.error('Error updating phone status to online:', error);
+  }
+
+  console.log(`📱 Phone online: ${phoneNumber}`);
+  return { success: true, type: 'phone_online' };
+}
+
+// =============================================
+// MAIN WEBHOOK HANDLER
+// =============================================
+
+export async function POST(request: NextRequest) {
+  const startTime = Date.now();
+  const supabase = createAdminClient();
+  
+  // Get headers for logging
+  const headers: Record<string, string> = {};
+  request.headers.forEach((value, key) => {
+    headers[key] = value;
+  });
+  
+  // Get source IP
+  const sourceIp = request.headers.get('x-forwarded-for') || 
+                   request.headers.get('x-real-ip') || 
+                   'unknown';
+
+  let body: Record<string, unknown> = {} as Record<string, unknown>;
+  let eventType: string | null = null;
+
+  try {
+    body = await request.json();
+    
+    // Get event type from header or body (CloudEvents format)
+    eventType =
+      request.headers.get('X-Event-Type') ||
+      (body.type as string) ||
+      (body.event_type as string) ||
+      null;
+
+    // LOG EVERY INCOMING WEBHOOK REQUEST
+    await supabase.from('webhook_logs').insert({
+      event_type: eventType,
+      headers: headers,
+      body: body,
+      source_ip: sourceIp,
+      processed: false,
+    });
+
+    console.log(`\n🔔 Webhook received: ${eventType}`);
+    console.log('Headers:', JSON.stringify(headers, null, 2));
+    console.log('Payload:', JSON.stringify(body, null, 2));
+    console.log('Source IP:', sourceIp);
+
+    // Extract data from CloudEvents format
+    const data = (body.data || body) as Record<string, unknown>;
+
+    // Route to appropriate handler
+    let result;
+    switch (eventType) {
+      case 'message.phone.received':
+        result = await handleMessageReceived(supabase, data);
+        break;
+
+      case 'message.phone.sent':
+        result = await handleMessageSent(supabase, data);
+        break;
+
+      case 'message.phone.delivered':
+        result = await handleMessageDelivered(supabase, data);
+        break;
+
+      case 'message.send.failed':
+        result = await handleMessageFailed(supabase, data);
+        break;
+
+      case 'message.send.expired':
+        result = await handleMessageExpired(supabase, data);
+        break;
+
+      case 'message.call.missed':
+        result = await handleMissedCall(supabase, data);
+        break;
+
+      case 'phone.heartbeat.offline':
+        result = await handlePhoneOffline(supabase, data);
+        break;
+
+      case 'phone.heartbeat.online':
+        result = await handlePhoneOnline(supabase, data);
+        break;
+
+      default:
+        console.log(`⚠️ Unknown event type: ${eventType}`);
+        result = { success: true, type: 'unknown', eventType };
+    }
+
+    const duration = Date.now() - startTime;
+    console.log(`✓ Webhook processed in ${duration}ms\n`);
+
+    // Update log as processed
+    await supabase
+      .from('webhook_logs')
+      .update({ processed: true })
+      .eq('event_type', eventType)
+      .order('created_at', { ascending: false })
+      .limit(1);
+
+    return NextResponse.json(result);
+  } catch (error) {
+    const duration = Date.now() - startTime;
+    console.error(`✗ Webhook error after ${duration}ms:`, error);
+
+    // Log the error
+    await supabase.from('webhook_logs').insert({
+      event_type: eventType || 'PARSE_ERROR',
+      headers: headers,
+      body: body,
+      source_ip: sourceIp,
+      processed: false,
+      error: String(error),
+    });
+
+    return NextResponse.json(
+      { error: 'Internal server error', details: String(error) },
+      { status: 500 }
+    );
+  }
+}
+
+// Health check endpoint
+export async function GET() {
+  return NextResponse.json({
+    status: 'active',
+    endpoint: '/api/webhooks/httpsms',
+    supported_events: [
+      'message.phone.received',
+      'message.phone.sent',
+      'message.phone.delivered',
+      'message.send.failed',
+      'message.send.expired',
+      'message.call.missed',
+      'phone.heartbeat.offline',
+      'phone.heartbeat.online',
+    ],
+  });
+}

@@ -2,7 +2,10 @@
 
 export type UserRole = 'superadmin' | 'org_admin' | 'sales';
 export type MessageDirection = 'inbound' | 'outbound';
-export type MessageStatus = 'sent' | 'received' | 'failed' | 'pending';
+export type MessageStatus = 'sent' | 'received' | 'failed' | 'pending' | 'delivered' | 'expired';
+
+// Thread flags for conversation status tracking
+export type ThreadFlag = 'no_response' | 'active' | 'booked' | 'dead';
 
 export interface Organization {
   id: string;
@@ -96,6 +99,7 @@ export interface Thread {
   unread_count: number;
   assigned_to: string | null;
   organization_id: string | null;
+  flag: ThreadFlag;
   metadata: ThreadMetadata;
   created_at: string;
   updated_at: string;
@@ -161,7 +165,6 @@ export interface CreateOrganizationRequest {
 export type CampaignStatus = 'draft' | 'running' | 'paused' | 'completed' | 'cancelled';
 export type CampaignAssignmentMode = 'single_user' | 'random_distribution';
 export type VehicleReferenceMode = 'make' | 'model';
-export type CampaignType = 'normal' | 'custom';
 
 export interface Campaign {
   id: string;
@@ -173,7 +176,6 @@ export interface Campaign {
   message_template: string;
   vehicle_reference_mode: VehicleReferenceMode;
   use_customer_name: boolean;
-  campaign_type: CampaignType;
   total_leads: number;
   sent_count: number;
   failed_count: number;
@@ -197,9 +199,6 @@ export interface CampaignLead {
   make: string | null;
   model: string | null;
   kijiji_link: string | null;
-  salesperson: string | null;
-  month: string | null;
-  custom_fields: Record<string, string> | null;
   status: 'pending' | 'sent' | 'failed' | 'skipped';
   error_message: string | null;
   sent_at: string | null;
