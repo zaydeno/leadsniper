@@ -1137,7 +1137,7 @@ export function CampaignsManager({ initialCampaigns, organizations, users }: Cam
                     </div>
                     <div className="text-center p-2 bg-[#0a0a0f] rounded-lg">
                       <p className="text-lg font-bold text-gray-400">{campaign.total_leads - campaign.sent_count - campaign.failed_count}</p>
-                      <p className="text-xs text-gray-500">Pending</p>
+                      <p className="text-xs text-gray-500">Remaining</p>
                     </div>
                   </div>
 

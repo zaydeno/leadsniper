@@ -354,13 +354,28 @@ async function processOneLead(
       campaign.use_customer_name
     );
     
-    // Log if any placeholders weren't replaced (still contain [])
-    if (finalMessage.includes('[') && finalMessage.includes(']')) {
-      await addLog(adminClient, campaignId, 'warning', `Unreplaced placeholders detected`, { 
+    // FAILSAFE: Check if any placeholders weren't replaced (still contain [SomeText])
+    const unreplacedMatch = finalMessage.match(/\[[^\]]+\]/g);
+    if (unreplacedMatch && unreplacedMatch.length > 0) {
+      await addLog(adminClient, campaignId, 'error', `⚠️ SKIPPED - Unreplaced placeholders: ${unreplacedMatch.join(', ')}`, { 
         lead_phone: lead.phone_number,
+        lead_name: lead.name,
         lead_data: leadData,
-        message_preview: finalMessage.substring(0, 200) 
+        unreplaced_placeholders: unreplacedMatch,
+        message_preview: finalMessage.substring(0, 300) 
       });
+      
+      // Mark as skipped, not failed
+      await adminClient
+        .from('campaign_leads')
+        .update({ 
+          status: 'skipped', 
+          error_message: `Unreplaced placeholders: ${unreplacedMatch.join(', ')}` 
+        })
+        .eq('id', lead.id);
+
+      // Don't count as failed, just skip and continue
+      return { success: false, shouldContinue: true, sentCount: currentSentCount, failedCount: currentFailedCount };
     }
 
     await addLog(adminClient, campaignId, 'info', `Sending SMS to ${lead.phone_number}`, { message_preview: finalMessage.substring(0, 100) + '...' });
