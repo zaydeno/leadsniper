@@ -174,6 +174,11 @@ export async function POST(request: NextRequest) {
     }
 
     // Insert campaign leads with fair distribution for random mode
+    // Log first lead for debugging
+    if (leads.length > 0) {
+      console.log('First lead data received:', JSON.stringify(leads[0], null, 2));
+    }
+    
     const leadsToInsert = leads.map((lead: {
       phone_number: string;
       name?: string;
@@ -331,19 +336,32 @@ async function processOneLead(
   try {
     // Generate message with spintax and placeholders
     const parsedMessage = parseSpintax(campaign.message_template);
+    
+    // Log lead data for debugging placeholder replacement
+    const leadData = { 
+      name: lead.name, 
+      make: lead.make, 
+      model: lead.model,
+      salesperson: lead.salesperson,
+      month: lead.month,
+      custom_fields: lead.custom_fields,
+    };
+    
     const finalMessage = replacePlaceholders(
       parsedMessage,
-      { 
-        name: lead.name, 
-        make: lead.make, 
-        model: lead.model,
-        salesperson: lead.salesperson,
-        month: lead.month,
-        custom_fields: lead.custom_fields,
-      },
+      leadData,
       campaign.vehicle_reference_mode,
       campaign.use_customer_name
     );
+    
+    // Log if any placeholders weren't replaced (still contain [])
+    if (finalMessage.includes('[') && finalMessage.includes(']')) {
+      await addLog(adminClient, campaignId, 'warning', `Unreplaced placeholders detected`, { 
+        lead_phone: lead.phone_number,
+        lead_data: leadData,
+        message_preview: finalMessage.substring(0, 200) 
+      });
+    }
 
     await addLog(adminClient, campaignId, 'info', `Sending SMS to ${lead.phone_number}`, { message_preview: finalMessage.substring(0, 100) + '...' });
 

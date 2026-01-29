@@ -307,7 +307,8 @@ export function CampaignsManager({ initialCampaigns, organizations, users }: Cam
     
     reader.onload = (event) => {
       const text = event.target?.result as string;
-      const lines = text.split('\n').filter(line => line.trim());
+      // Handle both Windows (\r\n) and Unix (\n) line endings
+      const lines = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n').filter(line => line.trim());
       
       if (lines.length < 2) {
         toast.error('CSV file must have headers and at least one data row');
@@ -315,26 +316,32 @@ export function CampaignsManager({ initialCampaigns, organizations, users }: Cam
       }
 
       // Parse headers - preserve original names for custom fields
-      const rawHeaders = lines[0].split(',').map(h => h.trim());
-      const headers = rawHeaders.map(h => h.toLowerCase());
+      // Also strip any remaining special characters and normalize
+      const rawHeaders = lines[0].split(',').map(h => h.trim().replace(/[\r\n]/g, ''));
+      const headers = rawHeaders.map(h => h.toLowerCase().trim());
       
-      // Map headers to expected fields (flexible matching)
+      // Map headers to expected fields (flexible matching - more lenient)
       const headerMap: Record<string, number> = {};
       const customHeaders: string[] = [];
       
       headers.forEach((h, i) => {
-        if (h.includes('phone')) headerMap.phone_number = i;
-        else if (h === 'name' || h === 'customer name' || h === 'customername') headerMap.name = i;
-        else if (h === 'make') headerMap.make = i;
-        else if (h === 'model') headerMap.model = i;
+        // Normalize the header for matching (remove spaces, special chars)
+        const normalized = h.replace(/[^a-z0-9]/g, '');
+        
+        if (h.includes('phone') || normalized === 'phonenumber') headerMap.phone_number = i;
+        else if (h === 'name' || h === 'customer name' || normalized === 'customername') headerMap.name = i;
+        else if (h === 'make' || normalized === 'make') headerMap.make = i;
+        else if (h === 'model' || normalized === 'model') headerMap.model = i;
         else if (h.includes('kijiji') || h.includes('link')) headerMap.kijiji_link = i;
-        else if (h === 'salesperson' || h === 'sales person' || h === 'rep') headerMap.salesperson = i;
-        else if (h === 'month') headerMap.month = i;
+        else if (h === 'salesperson' || h === 'sales person' || h === 'rep' || normalized === 'salesperson') headerMap.salesperson = i;
+        else if (h === 'month' || normalized === 'month') headerMap.month = i;
         else {
           // Track custom headers for custom campaigns
           customHeaders.push(rawHeaders[i]); // Use original case
         }
       });
+      
+      console.log('CSV Header Detection:', { rawHeaders, headers, headerMap });
 
       if (headerMap.phone_number === undefined) {
         toast.error('CSV must have a phone number column');
