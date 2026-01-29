@@ -342,6 +342,15 @@ export function CampaignsManager({ initialCampaigns, organizations, users }: Cam
       });
       
       console.log('CSV Header Detection:', { rawHeaders, headers, headerMap });
+      
+      // Alert user about detected fields for debugging
+      const detectedFields = Object.keys(headerMap).filter(k => k !== 'phone_number');
+      console.log('Detected fields:', detectedFields);
+      
+      // Warn if Month is in message but not in headers
+      if (newCampaign.message_template.toLowerCase().includes('[month]') && headerMap.month === undefined) {
+        toast.warning('Warning: Your message uses [Month] but no Month column was found in CSV!');
+      }
 
       if (headerMap.phone_number === undefined) {
         toast.error('CSV must have a phone number column');

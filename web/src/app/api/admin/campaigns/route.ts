@@ -174,9 +174,19 @@ export async function POST(request: NextRequest) {
     }
 
     // Insert campaign leads with fair distribution for random mode
-    // Log first lead for debugging
+    // Log lead data for debugging - especially month field
     if (leads.length > 0) {
-      console.log('First lead data received:', JSON.stringify(leads[0], null, 2));
+      console.log('Campaign creation - First 3 leads received:');
+      leads.slice(0, 3).forEach((lead: Record<string, unknown>, idx: number) => {
+        console.log(`Lead ${idx + 1}:`, {
+          phone: lead.phone_number,
+          name: lead.name,
+          month: lead.month,
+          salesperson: lead.salesperson,
+          has_month: !!lead.month,
+          month_type: typeof lead.month,
+        });
+      });
     }
     
     const leadsToInsert = leads.map((lead: {
@@ -357,20 +367,30 @@ async function processOneLead(
     // FAILSAFE: Check if any placeholders weren't replaced (still contain [SomeText])
     const unreplacedMatch = finalMessage.match(/\[[^\]]+\]/g);
     if (unreplacedMatch && unreplacedMatch.length > 0) {
-      await addLog(adminClient, campaignId, 'error', `⚠️ SKIPPED - Unreplaced placeholders: ${unreplacedMatch.join(', ')}`, { 
+      // Build detailed debug info
+      const debugInfo = {
         lead_phone: lead.phone_number,
-        lead_name: lead.name,
-        lead_data: leadData,
+        lead_name: lead.name || '(empty)',
+        lead_month: lead.month || '(empty)',
+        lead_salesperson: lead.salesperson || '(empty)',
+        lead_make: lead.make || '(empty)',
+        lead_model: lead.model || '(empty)',
+        custom_fields: lead.custom_fields || '(none)',
         unreplaced_placeholders: unreplacedMatch,
-        message_preview: finalMessage.substring(0, 300) 
-      });
+        message_preview: finalMessage.substring(0, 400),
+      };
+      
+      await addLog(adminClient, campaignId, 'error', 
+        `⚠️ SKIPPED "${lead.name || lead.phone_number}" - Missing data for: ${unreplacedMatch.join(', ')}. Month value: "${lead.month || 'EMPTY'}"`, 
+        debugInfo
+      );
       
       // Mark as skipped, not failed
       await adminClient
         .from('campaign_leads')
         .update({ 
           status: 'skipped', 
-          error_message: `Unreplaced placeholders: ${unreplacedMatch.join(', ')}` 
+          error_message: `Unreplaced placeholders: ${unreplacedMatch.join(', ')}. Month was: "${lead.month || 'empty'}"` 
         })
         .eq('id', lead.id);
 
