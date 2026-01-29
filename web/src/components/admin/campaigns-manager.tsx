@@ -329,7 +329,8 @@ export function CampaignsManager({ initialCampaigns, organizations, users }: Cam
         const normalized = h.replace(/[^a-z0-9]/g, '');
         
         if (h.includes('phone') || normalized === 'phonenumber') headerMap.phone_number = i;
-        else if (h === 'name' || h === 'customer name' || normalized === 'customername') headerMap.name = i;
+        // Match various name column headers: "name", "customer", "customer name", "customername"
+        else if (h === 'name' || h === 'customer' || h === 'customer name' || normalized === 'customername' || normalized === 'customer') headerMap.name = i;
         else if (h === 'make' || normalized === 'make') headerMap.make = i;
         else if (h === 'model' || normalized === 'model') headerMap.model = i;
         else if (h.includes('kijiji') || h.includes('link')) headerMap.kijiji_link = i;

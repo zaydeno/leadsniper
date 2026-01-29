@@ -31,7 +31,14 @@ function parseSpintax(template: string): string {
 // Replace placeholders with actual values (square bracket format)
 function replacePlaceholders(
   message: string,
-  lead: { name?: string; make?: string; model?: string },
+  lead: { 
+    name?: string; 
+    make?: string; 
+    model?: string;
+    salesperson?: string;
+    month?: string;
+    custom_fields?: Record<string, string> | null;
+  },
   vehicleMode: 'make' | 'model',
   useCustomerName: boolean = true
 ): string {
@@ -42,6 +49,18 @@ function replacePlaceholders(
   result = result.replace(/\[Customer Name\]/gi, useCustomerName ? (lead.name || 'there') : 'there');
   result = result.replace(/\[Make\]/gi, lead.make || '');
   result = result.replace(/\[Model\]/gi, lead.model || '');
+  // Custom campaign fields
+  result = result.replace(/\[Salesperson\]/gi, lead.salesperson || '');
+  result = result.replace(/\[Month\]/gi, lead.month || '');
+  
+  // Replace any custom fields
+  if (lead.custom_fields) {
+    for (const [key, value] of Object.entries(lead.custom_fields)) {
+      const regex = new RegExp(`\\[${key}\\]`, 'gi');
+      result = result.replace(regex, value || '');
+    }
+  }
+  
   return result;
 }
 
@@ -307,6 +326,9 @@ async function processOneLead(
     make?: string;
     model?: string;
     kijiji_link?: string;
+    salesperson?: string;
+    month?: string;
+    custom_fields?: Record<string, string> | null;
     assigned_to?: string;
     lead_order: number;
   },
@@ -334,12 +356,56 @@ async function processOneLead(
   try {
     // Generate message with spintax and placeholders
     const parsedMessage = parseSpintax(campaign.message_template);
+    
+    // Build lead data for placeholder replacement
+    const leadData = { 
+      name: lead.name, 
+      make: lead.make, 
+      model: lead.model,
+      salesperson: lead.salesperson,
+      month: lead.month,
+      custom_fields: lead.custom_fields,
+    };
+    
     const finalMessage = replacePlaceholders(
       parsedMessage,
-      { name: lead.name, make: lead.make, model: lead.model },
+      leadData,
       campaign.vehicle_reference_mode,
       campaign.use_customer_name
     );
+    
+    // FAILSAFE: Check if any placeholders weren't replaced (still contain [SomeText])
+    const unreplacedMatch = finalMessage.match(/\[[^\]]+\]/g);
+    if (unreplacedMatch && unreplacedMatch.length > 0) {
+      const debugInfo = {
+        lead_phone: lead.phone_number,
+        lead_name: lead.name || '(empty)',
+        lead_month: lead.month || '(empty)',
+        lead_salesperson: lead.salesperson || '(empty)',
+        lead_make: lead.make || '(empty)',
+        lead_model: lead.model || '(empty)',
+        custom_fields: lead.custom_fields || '(none)',
+        unreplaced_placeholders: unreplacedMatch,
+        message_preview: finalMessage.substring(0, 400),
+      };
+      
+      await addLog(adminClient, campaignId, 'error', 
+        `⚠️ SKIPPED "${lead.name || lead.phone_number}" - Missing data for: ${unreplacedMatch.join(', ')}. Month value: "${lead.month || 'EMPTY'}"`, 
+        debugInfo
+      );
+      
+      // Mark as skipped, not failed
+      await adminClient
+        .from('campaign_leads')
+        .update({ 
+          status: 'skipped', 
+          error_message: `Unreplaced placeholders: ${unreplacedMatch.join(', ')}. Month was: "${lead.month || 'empty'}"` 
+        })
+        .eq('id', lead.id);
+
+      // Don't count as failed, just skip and continue
+      return { success: false, shouldContinue: true, sentCount: currentSentCount, failedCount: currentFailedCount };
+    }
 
     await addLog(adminClient, campaignId, 'info', `Sending SMS to ${lead.phone_number}`, { message_preview: finalMessage.substring(0, 100) + '...' });
 
